@@ -142,6 +142,7 @@ class MQTTToROS2Bridge(Node):
         try:
             # Parse JSON message
             payload = msg.payload.decode('utf-8')
+            self.get_logger().info(f'Received MQTT message on topic {msg.topic}: {payload}')
             data = json.loads(payload)
             
             # Create ROS2 message
@@ -167,9 +168,9 @@ class MQTTToROS2Bridge(Node):
             
             # Publish to ROS2
             self.publisher_.publish(ros2_msg)
-            self.get_logger().debug(
-                f'Published: lx={ros2_msg.lx}, ly={ros2_msg.ly}, '
-                f'rx={ros2_msg.rx}, ry={ros2_msg.ry}, keys={ros2_msg.keys}'
+            self.get_logger().info(
+                f'Published to ROS2: lx={ros2_msg.lx:.3f}, ly={ros2_msg.ly:.3f}, '
+                f'rx={ros2_msg.rx:.3f}, ry={ros2_msg.ry:.3f}, keys={ros2_msg.keys}'
             )
             
         except json.JSONDecodeError as e:
