@@ -1,0 +1,18 @@
+services:
+  ros:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: go2-nav
+    volumes:
+      - ./src:/workspace/src
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XAUTHORITY:-$HOME/.Xauthority}:/root/.Xauthority:rw
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - XAUTHORITY=/root/.Xauthority
+    network_mode: host
+    stdin_open: true
+    tty: true
+    command: /bin/zsh
