@@ -13,6 +13,10 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
+        (os.path.join('share', package_name, 'params'), glob('params/*.yaml')),
+        (os.path.join('share', package_name, 'rviz'), glob('rviz/*.rviz')),
+        # Install Python scripts as executables
+        ('lib/' + package_name, [os.path.join('go2_nav', 'imu_timestamp_fixer', 'imu_timestamp_fixer_node.py')]),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -27,6 +31,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'imu_timestamp_fixer = go2_nav.imu_timestamp_fixer.imu_timestamp_fixer_node:main',
         ],
     },
 )

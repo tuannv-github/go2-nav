@@ -2,3 +2,4 @@ build
 install
 log
 run_mqtt_to_ros2.sh.conf
+*.log

@@ -8,6 +8,8 @@
   <license>TODO: License declaration</license>
 
   <exec_depend>realsense2_camera</exec_depend>
+  <exec_depend>ros-humble-image-transport-plugins</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
