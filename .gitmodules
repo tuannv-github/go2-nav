@@ -1,3 +1,9 @@
 [submodule "src/unitree_ros2"]
 	path = src/unitree_ros2
 	url = https://github.com/unitreerobotics/unitree_ros2
+[submodule "src/champ"]
+	path = src/champ
+	url = https://github.com/chvmp/champ.git
+[submodule "src/rtabmap_ros"]
+	path = src/rtabmap_ros
+	url = https://github.com/introlab/rtabmap_ros.git
