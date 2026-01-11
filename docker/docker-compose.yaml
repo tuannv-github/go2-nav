@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: go2-nav
     volumes:
-      - ./src:/workspace/src
+      - ../:/workspace/
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${XAUTHORITY:-$HOME/.Xauthority}:/root/.Xauthority:rw
     environment:

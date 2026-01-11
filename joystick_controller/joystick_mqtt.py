@@ -10,9 +10,22 @@ import argparse
 import multiprocessing
 import logging
 import select
+import os
+import sys
 from datetime import datetime
 from evdev import InputDevice, categorize, ecodes
 import paho.mqtt.client as mqtt
+
+# Import device detection functions from list_joystick_devices
+# Always use shared detection - required dependency
+script_dir = os.path.dirname(os.path.abspath(__file__))
+list_devices_path = os.path.join(script_dir, 'list_joystick_devices.py')
+if not os.path.exists(list_devices_path):
+    raise FileNotFoundError(f"Required file not found: {list_devices_path}")
+
+# Add the directory to path to import the module
+sys.path.insert(0, script_dir)
+from list_joystick_devices import find_joystick_device_path
 
 
 class JoystickReader:
@@ -488,35 +501,6 @@ class JoystickMQTT:
             self.logger.info("All processes stopped")
 
 
-def find_joystick_device():
-    """Find joystick device automatically"""
-    import glob
-    import os
-    
-    # Common joystick device paths
-    possible_paths = [
-        '/dev/input/js0',
-        '/dev/input/js1',
-        '/dev/input/js2',
-    ]
-    
-    # Also check /dev/input/event* for Xbox controllers
-    event_devices = glob.glob('/dev/input/event*')
-    
-    for path in possible_paths + event_devices:
-        try:
-            device = InputDevice(path)
-            # Check if it's a joystick/gamepad
-            if 'js' in path or any(cap in device.capabilities() for cap in [ecodes.EV_ABS, ecodes.EV_KEY]):
-                # Use basicConfig logger since we don't have instance logger here
-                logging.info(f"Found joystick device: {device.name} at {path}")
-                return path
-        except:
-            continue
-    
-    return None
-
-
 def main():
     parser = argparse.ArgumentParser(description='Read joystick input and publish to MQTT')
     parser.add_argument('--device', '-d', type=str, default=None,
@@ -538,14 +522,34 @@ def main():
     
     args = parser.parse_args()
     
+    # Setup basic logging early so we can see device detection messages
+    log_file = args.log_file if args.log_file else "joystick_mqtt.py.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
+    )
+    
     # Find joystick device if not specified
     device_path = args.device
     if device_path is None:
-        device_path = find_joystick_device()
+        logging.info("Auto-detecting joystick device...")
+        device_path = find_joystick_device_path()
         if device_path is None:
             logging.error("Error: No joystick device found. Please specify --device")
             return 1
+        else:
+            # Log the detected device name
+            try:
+                device = InputDevice(device_path)
+                logging.info(f"Auto-detected joystick device: {device.name} at {device_path}")
+            except Exception as e:
+                logging.warning(f"Found device path {device_path} but couldn't open it: {e}")
     
+    logging.info(f"Using joystick device: {device_path}")
     try:
         joystick_mqtt = JoystickMQTT(
             device_path=device_path,

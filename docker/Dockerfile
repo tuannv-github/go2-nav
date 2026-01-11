@@ -47,5 +47,8 @@ RUN apt-get update && apt-get install -y \
 ros-humble-rosidl-generator-dds-idl \
 && rm -rf /var/lib/apt/lists/*
 
+# Install Python dependencies for joystick controller
+RUN pip install "evdev>=1.6.1" "paho-mqtt>=1.6.1"
+
 # Build workspace
 RUN /bin/zsh -c "source /opt/ros/humble/setup.zsh && cd /workspace && colcon build"
