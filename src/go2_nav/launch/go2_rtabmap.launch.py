@@ -25,6 +25,7 @@ Example:
     ros2 launch go2_nav go2_rtabmap.launch.py use_sim_time:=false filter_imu:=true
 """
 
+import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
@@ -47,6 +48,9 @@ def launch_setup(context, *args, **kwargs):
     # Raw IMU from Go2 may not have orientation, so don't wait for it
     filter_imu_enabled = LaunchConfiguration('filter_imu').perform(context) == 'true'
     wait_imu_to_init = use_imu and filter_imu_enabled
+    
+    # Database path for saving/loading maps
+    database_path = LaunchConfiguration('database_path').perform(context) or os.path.expanduser('~/.ros/rtabmap.db')
 
     vslam_params = {
         'frame_id': 'base_link',
@@ -58,6 +62,7 @@ def launch_setup(context, *args, **kwargs):
         'use_action_for_goal': True,
         'wait_imu_to_init': wait_imu_to_init,
         'wait_for_transform': 0.5,
+        'database_path': database_path,
         # RTAB-Map's parameters should be strings
         'Grid/DepthDecimation': '1',
         'Grid/RangeMax': '2',
@@ -242,6 +247,12 @@ def generate_launch_description():
             default_value='false',
             choices=['true', 'false'],
             description='Launch rtabmap in localization mode (a map should have been already created).'
+        ),
+        
+        DeclareLaunchArgument(
+            'database_path',
+            default_value='',
+            description='Path to RTAB-Map database file. Default: ~/.ros/rtabmap.db. The map will be automatically saved here.'
         ),
         
         # Camera transform parameters (adjust based on your camera mounting)
