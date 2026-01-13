@@ -84,51 +84,7 @@ def launch_setup(context, *args, **kwargs):
     if use_imu:
         vslam_remappings.append(('imu', imu_topic))
     
-    # Get camera transform parameters
-    camera_x = LaunchConfiguration('camera_x').perform(context) or '-0.15'
-    camera_y = LaunchConfiguration('camera_y').perform(context) or '0.0'
-    camera_z = LaunchConfiguration('camera_z').perform(context) or '0.1'
-    camera_roll = LaunchConfiguration('camera_roll').perform(context) or '0.0'
-    camera_pitch = LaunchConfiguration('camera_pitch').perform(context) or '0.0'
-    camera_yaw = LaunchConfiguration('camera_yaw').perform(context) or '0.0'
-    
-    # Convert Euler angles (in degrees) to quaternion
-    import math
-    try:
-        roll = float(camera_roll) * math.pi / 180.0
-        pitch = float(camera_pitch) * math.pi / 180.0
-        yaw = float(camera_yaw) * math.pi / 180.0
-        
-        # Convert Euler to quaternion (ZYX convention)
-        cy = math.cos(yaw * 0.5)
-        sy = math.sin(yaw * 0.5)
-        cp = math.cos(pitch * 0.5)
-        sp = math.sin(pitch * 0.5)
-        cr = math.cos(roll * 0.5)
-        sr = math.sin(roll * 0.5)
-        
-        qw = cr * cp * cy + sr * sp * sy
-        qx = sr * cp * cy - cr * sp * sy
-        qy = cr * sp * cy + sr * cp * sy
-        qz = cr * cp * sy - sr * sp * cy
-    except (ValueError, TypeError):
-        # Default: no rotation
-        qx, qy, qz, qw = 0.0, 0.0, 0.0, 1.0
-    
     return [
-        # Static transform from base_link to camera_link
-        # This connects the robot base to the camera frame
-        # Adjust x, y, z, roll, pitch, yaw based on your camera mounting
-        # Default: -0.15m forward (0.15m backward), 0.1m up, no rotation (adjust as needed)
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_link_to_camera_link',
-            arguments=[str(camera_x), str(camera_y), str(camera_z), 
-                      str(qx), str(qy), str(qz), str(qw), 
-                      'base_link', 'camera_link']
-        ),
-        
         # Static transform from base_link to IMU frame
         # Transform: x y z qx qy qz qw (0 0 0 0 0 0 1 = identity transform)
         Node(
@@ -253,38 +209,6 @@ def generate_launch_description():
             'database_path',
             default_value='',
             description='Path to RTAB-Map database file. Default: ~/.ros/rtabmap.db. The map will be automatically saved here.'
-        ),
-        
-        # Camera transform parameters (adjust based on your camera mounting)
-        DeclareLaunchArgument(
-            'camera_x',
-            default_value='-0.15',
-            description='X offset of camera from base_link (meters, forward)'
-        ),
-        DeclareLaunchArgument(
-            'camera_y',
-            default_value='0.0',
-            description='Y offset of camera from base_link (meters, left)'
-        ),
-        DeclareLaunchArgument(
-            'camera_z',
-            default_value='0.1',
-            description='Z offset of camera from base_link (meters, up)'
-        ),
-        DeclareLaunchArgument(
-            'camera_roll',
-            default_value='0.0',
-            description='Roll angle of camera in degrees'
-        ),
-        DeclareLaunchArgument(
-            'camera_pitch',
-            default_value='0.0',
-            description='Pitch angle of camera in degrees'
-        ),
-        DeclareLaunchArgument(
-            'camera_yaw',
-            default_value='0.0',
-            description='Yaw angle of camera in degrees'
         ),
         
         OpaqueFunction(function=launch_setup)
