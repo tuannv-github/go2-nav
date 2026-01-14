@@ -80,7 +80,7 @@ def generate_launch_description():
     # Camera transform parameters (adjust based on your camera mounting)
     declare_camera_x = DeclareLaunchArgument(
         'camera_x',
-        default_value='-0.15',
+        default_value='0.0',
         description='X offset of camera from base_link (meters, forward)'
     )
     declare_camera_y = DeclareLaunchArgument(
@@ -100,7 +100,7 @@ def generate_launch_description():
     )
     declare_camera_pitch = DeclareLaunchArgument(
         'camera_pitch',
-        default_value='0.0',
+        default_value='-20.0',
         description='Pitch angle of camera in degrees'
     )
     declare_camera_yaw = DeclareLaunchArgument(
@@ -156,12 +156,12 @@ def launch_setup(context, *args, **kwargs):
     }
     
     # Get camera transform parameters
-    camera_x = LaunchConfiguration('camera_x').perform(context) or '-0.15'
-    camera_y = LaunchConfiguration('camera_y').perform(context) or '0.0'
-    camera_z = LaunchConfiguration('camera_z').perform(context) or '0.1'
-    camera_roll = LaunchConfiguration('camera_roll').perform(context) or '0.0'
-    camera_pitch = LaunchConfiguration('camera_pitch').perform(context) or '0.0'
-    camera_yaw = LaunchConfiguration('camera_yaw').perform(context) or '0.0'
+    camera_x = LaunchConfiguration('camera_x').perform(context)
+    camera_y = LaunchConfiguration('camera_y').perform(context)
+    camera_z = LaunchConfiguration('camera_z').perform(context)
+    camera_roll = LaunchConfiguration('camera_roll').perform(context)
+    camera_pitch = LaunchConfiguration('camera_pitch').perform(context)
+    camera_yaw = LaunchConfiguration('camera_yaw').perform(context)
     
     # Convert Euler angles (in degrees) to quaternion
     import math
