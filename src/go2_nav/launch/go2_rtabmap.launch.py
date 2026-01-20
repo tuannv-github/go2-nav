@@ -32,6 +32,27 @@ from launch.substitutions import LaunchConfiguration
 from launch.conditions import IfCondition, UnlessCondition
 from launch_ros.actions import Node
 
+def get_workspace_root():
+    """Get workspace root directory by finding the directory containing 'src'."""
+    # Get the launch file's directory
+    launch_file_path = os.path.abspath(__file__)
+    current_dir = os.path.dirname(launch_file_path)
+    
+    # Go up until we find a directory with 'src' subdirectory (workspace root)
+    # This works for both source and installed packages
+    max_levels = 10  # Safety limit to avoid infinite loops
+    level = 0
+    while level < max_levels and current_dir != os.path.dirname(current_dir):
+        if os.path.exists(os.path.join(current_dir, 'src')):
+            return current_dir
+        current_dir = os.path.dirname(current_dir)
+        level += 1
+    
+    # Fallback: go up 3 levels from launch file location
+    # (src/go2_nav/launch -> workspace root)
+    launch_file_dir = os.path.dirname(launch_file_path)
+    return os.path.dirname(os.path.dirname(os.path.dirname(launch_file_dir)))
+
 def launch_setup(context, *args, **kwargs):
     
     localization = LaunchConfiguration('localization')
@@ -50,7 +71,31 @@ def launch_setup(context, *args, **kwargs):
     wait_imu_to_init = use_imu and filter_imu_enabled
     
     # Database path for saving/loading maps
-    database_path = LaunchConfiguration('database_path').perform(context) or os.path.expanduser('~/.ros/rtabmap.db')
+    # Only use database from PROJECT_ROOT_DIR/map, don't fall back to ~/.ros/rtabmap.db
+    provided_db_path = LaunchConfiguration('database_path').perform(context)
+    database_exists = False
+    
+    if provided_db_path:
+        # Use explicitly provided database path
+        database_path = provided_db_path
+        database_exists = os.path.exists(database_path)
+        if database_exists:
+            print(f"[go2_rtabmap] Using provided RTAB-Map database: {database_path}")
+        else:
+            print(f"[go2_rtabmap] Provided database path does not exist, will create new: {database_path}")
+    else:
+        # Only use database from project map directory
+        workspace_dir = get_workspace_root()
+        map_db_path = os.path.join(workspace_dir, 'map', 'rtabmap.db')
+        database_path = map_db_path
+        
+        if os.path.exists(map_db_path):
+            database_exists = True
+            print(f"[go2_rtabmap] RTAB-Map database found in map directory: {database_path}")
+        else:
+            database_exists = False
+            print(f"[go2_rtabmap] No database found in map directory, will create new: {database_path}")
+            print(f"  (Database will be saved to: {database_path})")
 
     vslam_params = {
         'frame_id': 'base_link',
@@ -156,9 +201,11 @@ def launch_setup(context, *args, **kwargs):
             package='rtabmap_slam',
             executable='rtabmap',
             output='screen',
-            parameters=[vslam_params],
+            parameters=[vslam_params] + ([
+                {'Mem/InitWMWithAllNodes': 'True'}  # Load all nodes from existing database
+            ] if database_exists else []),
             remappings=vslam_remappings,
-            arguments=['-d']
+            arguments=[] if database_exists else ['-d']  # Don't delete if database exists
         ),
             
         # Localization mode:
@@ -178,6 +225,12 @@ def launch_setup(context, *args, **kwargs):
     ]
 
 def generate_launch_description():
+    # Set up log directory in project root (for tee redirection)
+    workspace_dir = get_workspace_root()
+    log_dir = os.path.join(workspace_dir, 'log')
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, 'go2_rtabmap.launch.log')
+    print(f"[go2_rtabmap] Use tee to capture logs: ros2 launch go2_nav go2_rtabmap.launch.py 2>&1 | tee -a {log_file}")
     
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -208,7 +261,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'database_path',
             default_value='',
-            description='Path to RTAB-Map database file. Default: ~/.ros/rtabmap.db. The map will be automatically saved here.'
+            description='Path to RTAB-Map database file. If not provided, uses PROJECT_ROOT_DIR/map/rtabmap.db. The map will be automatically saved to the specified or default location.'
         ),
         
         OpaqueFunction(function=launch_setup)
