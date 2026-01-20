@@ -10,7 +10,7 @@
     <Discovery>
       <Peers>
         <!-- Point to server -->
-        <Peer address="10.1.100.53"/>
+        <Peer address="10.1.100.250"/>
       </Peers>
     </Discovery>
   </Domain>
