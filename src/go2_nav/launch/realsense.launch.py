@@ -90,7 +90,7 @@ def generate_launch_description():
     )
     declare_camera_z = DeclareLaunchArgument(
         'camera_z',
-        default_value='0.25',
+        default_value='0.22',
         description='Z offset of camera from base_link (meters, up)'
     )
     declare_camera_roll = DeclareLaunchArgument(
@@ -100,7 +100,7 @@ def generate_launch_description():
     )
     declare_camera_pitch = DeclareLaunchArgument(
         'camera_pitch',
-        default_value='-20.0',
+        default_value='-22.0',
         description='Pitch angle of camera in degrees'
     )
     declare_camera_yaw = DeclareLaunchArgument(
