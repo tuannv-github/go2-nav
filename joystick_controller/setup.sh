@@ -5,6 +5,8 @@ set -e
 
 echo "Setting up joystick_controller..."
 
+sudo apt install python3.11-venv
+
 # Create virtual environment if it doesn't exist
 if [ ! -d "venv" ]; then
     echo "Creating virtual environment..."

@@ -28,21 +28,69 @@ sys.path.insert(0, script_dir)
 from list_joystick_devices import find_joystick_device_path
 
 
+# Device configurations mapping patterns in device names to specific settings
+DEVICE_CONFIGS = {
+    "EasySMX": {
+        "lx": (ecodes.EV_ABS, ecodes.ABS_X),
+        "ly": (ecodes.EV_ABS, ecodes.ABS_Y),
+        "rx": (ecodes.EV_ABS, ecodes.ABS_RX),
+        "ry": (ecodes.EV_ABS, ecodes.ABS_RY),
+        "l2": (ecodes.EV_KEY, ecodes.BTN_TL2),
+        "btn_a": (ecodes.EV_KEY, ecodes.BTN_SOUTH),
+        "axis_min": -32768,
+        "axis_max": 32767,
+    },
+    "Logitech": {
+        "lx": (ecodes.EV_ABS, ecodes.ABS_X),
+        "ly": (ecodes.EV_ABS, ecodes.ABS_Y),
+        "rx": (ecodes.EV_ABS, ecodes.ABS_Z),
+        "ry": (ecodes.EV_ABS, ecodes.ABS_RZ),
+        "l2": (ecodes.EV_KEY, 294),
+        "btn_a": (ecodes.EV_KEY, 289),
+        "btn_b": (ecodes.EV_KEY, 290),
+        "btn_x": (ecodes.EV_KEY, 288),
+        "btn_y": (ecodes.EV_KEY, 291),
+        "l1": (ecodes.EV_KEY, 292),
+        "r1": (ecodes.EV_KEY, 293),
+        "axis_min": 0,
+        "axis_max": 255,
+    },
+    "DEFAULT": {
+        "lx": (ecodes.EV_ABS, ecodes.ABS_X),
+        "ly": (ecodes.EV_ABS, ecodes.ABS_Y),
+        "rx": (ecodes.EV_ABS, ecodes.ABS_Z),
+        "ry": (ecodes.EV_ABS, ecodes.ABS_RZ),
+        "l2": (ecodes.EV_KEY, ecodes.BTN_TL2),
+        "btn_a": (ecodes.EV_KEY, ecodes.BTN_A),
+        "axis_min": 0,
+        "axis_max": 255,
+    }
+}
+
+
 class JoystickReader:
     """Class to read joystick events and send state to queue"""
     
-    def __init__(self, device_path, state_queue, running, button_mapping, log_file):
+    def __init__(self, device_path, device_name, state_queue, running, button_mapping, log_file,
+                 max_x_speed=1.0, max_y_speed=1.0, max_yaw_speed=1.0):
         self.device_path = device_path
+        self.device_name = device_name
         self.state_queue = state_queue
         self.running = running
         self.button_mapping = button_mapping
         self.log_file = log_file
+        self.max_x_speed = max_x_speed
+        self.max_y_speed = max_y_speed
+        self.max_yaw_speed = max_yaw_speed
         
         # Internal state
         self.axes_raw = {}
         self.axes_raw_values = {}
         self.buttons_raw = {}
         
+        # Configure mapping and normalization based on device name
+        config = DEVICE_CONFIGS["DEFAULT"]  # Start with default
+
         # Setup logging
         logging.basicConfig(
             level=logging.DEBUG,
@@ -53,80 +101,114 @@ class JoystickReader:
             ]
         )
         self.logger = logging.getLogger(__name__)
-    
-    @staticmethod
-    def normalize_axis(value, min_val=-32768, max_val=32767):
-        """Normalize axis value to range [-1.0, 1.0]"""
-        if value == 0:
+       
+        # Configure mapping and normalization based on device name
+        self.config = DEVICE_CONFIGS["DEFAULT"]  # Start with default
+        
+        for pattern, device_config in DEVICE_CONFIGS.items():
+            if pattern != "DEFAULT" and pattern in self.device_name:
+                self.config = device_config
+                self.logger.info(f"JoystickReader: Applied {pattern} configuration")
+                break
+        
+        self.axis_min = self.config["axis_min"]
+        self.axis_max = self.config["axis_max"]
+        
+        # Current normalized state of axes and special buttons
+        self.controller_state = {
+            'lx': 0.0, 'ly': 0.0, 'rx': 0.0, 'ry': 0.0, 'btn_a': 0, 'btn_b': 0,
+            'btn_x': 0, 'btn_y': 0, 'l1': 0, 'r1': 0, 'l2': 0
+        }
+        
+        # Build event_map from config roles
+        self.event_map = {}
+        # Support a wide range of roles
+        roles = ['lx', 'ly', 'rx', 'ry', 'btn_a', 'btn_b', 'btn_x', 'btn_y', 'l1', 'r1', 'l2']
+        for role in roles:
+            etype, ecode = self.config.get(role, (None, None))
+            if etype is not None and ecode is not None:
+                self.event_map[(etype, ecode)] = role
+        
+        # Build button part of event_map from button_mapping
+        for btn_name, bit_pos in self.button_mapping.items():
+            if hasattr(ecodes, btn_name):
+                code = getattr(ecodes, btn_name)
+                self.event_map[(ecodes.EV_KEY, code)] = ('key', bit_pos)
+
+    def normalize_axis(self, value):
+        """Normalize axis value to range [-1.0, 1.0] using configured ranges"""
+        if value == 0 and self.axis_min < 0:
             return 0.0
-        normalized = (value - min_val) / (max_val - min_val) * 2.0 - 1.0
+        
+        # Use instance-specific min/max
+        normalized = (value - self.axis_min) / (self.axis_max - self.axis_min) * 2.0 - 1.0
+        
         # Apply deadzone
         if abs(normalized) < 0.1:
             return 0.0
         return round(normalized, 3)
     
     def update_wireless_controller_state(self):
-        """Update WirelessController format from raw axes and buttons"""
-        # Map axes to lx, ly, rx, ry
-        # Xbox 360: ABS_X = left stick X, ABS_Y = left stick Y
-        #           ABS_RX = right stick X, ABS_RY = right stick Y
-        # Always update, even if value is 0.0 (to ensure 0.0 is published)
+        """Update WirelessController format from internal controller_state and buttons"""
+        # ly is forward/backward, lx is left/right (lateral), rx is yaw
+        # We scale these by the configured max speeds
         state = {
-            'lx': round(self.axes_raw.get('ABS_X', 0.0), 3),
-            'ly': round(-self.axes_raw.get('ABS_Y', 0.0), 3),  # Invert Y axis
-            'rx': round(self.axes_raw.get('ABS_RX', 0.0), 3),
-            'ry': round(-self.axes_raw.get('ABS_RY', 0.0), 3),  # Invert Y axis
+            'lx': round(self.controller_state.get('lx', 0.0) * self.max_y_speed, 3), # Lateral
+            'ly': round(-self.controller_state.get('ly', 0.0) * self.max_x_speed, 3), # Forward/Backward
+            'rx': round(self.controller_state.get('rx', 0.0) * self.max_yaw_speed, 3), # Yaw
+            'ry': round(-self.controller_state.get('ry', 0.0), 3),  # Invert Y axis
         }
         
         # Encode buttons as uint16 bitfield
         keys = 0
-        for button_name, bit_position in self.button_mapping.items():
-            if self.buttons_raw.get(button_name, 0):
+        
+        # 1. Map roles to bit positions
+        role_to_bit = {
+            'btn_a': 0, 'btn_b': 1, 'btn_x': 2, 'btn_y': 3,
+            'l1': 4, 'r1': 5, 'select': 6, 'start': 7, 'mode': 8,
+            'l3': 9, 'r3': 10
+        }
+        
+        for role, bit_pos in role_to_bit.items():
+            if self.controller_state.get(role, 0):
+                keys |= (1 << bit_pos)
+        
+        # 2. Fall back to generic buttons_raw for buttons not covered by roles
+        for button_name, pressed in self.buttons_raw.items():
+            # Check if this button's code is already handled by a role
+            if hasattr(ecodes, button_name):
+                code = getattr(ecodes, button_name)
+                if (ecodes.EV_KEY, code) in self.event_map:
+                    continue # Already handled by roles loop above
+                
+            bit_position = self.button_mapping.get(button_name)
+            if bit_position is not None and pressed:
                 keys |= (1 << bit_position)
         
-        # Also check for generic button codes
-        for button_name, pressed in self.buttons_raw.items():
-            if button_name not in self.button_mapping:
-                # Try to extract button number from name like BTN_0, BTN_1, etc.
-                try:
-                    button_name_str = str(button_name)
-                    if button_name_str.startswith('BTN_'):
-                        btn_num = int(button_name_str.split('_')[1])
-                        if btn_num < 16:  # Only use lower 16 bits
-                            if pressed:
-                                keys |= (1 << btn_num)
-                except (ValueError, IndexError, AttributeError):
-                    pass
+        # Special Unitree-style key logic:
+        # Use the mapped A button state
+        a_button_pressed = self.controller_state['btn_a']
+        l2_pressed = self.controller_state['l2']
         
-            # Special handling:
-            # 1. A button only (no other buttons, no ABS_Z=255) -> keys = 4
-            # 2. ABS_Z = 255 AND BTN_A -> keys = 288
-            # 3. ABS_Z = 255 (without BTN_A) -> keys = 32
-            
-            abs_z_raw = self.axes_raw_values.get('ABS_Z', 0)
-            # Check for both BTN_SOUTH and BTN_A (different controllers may use different names)
-            a_button_pressed = self.buttons_raw.get('BTN_SOUTH', 0) or self.buttons_raw.get('BTN_A', 0)
-            
-            # Check if only A button is pressed (no other buttons)
-            other_buttons_pressed = False
-            for button_name, pressed in self.buttons_raw.items():
-                if pressed and button_name not in ['BTN_SOUTH', 'BTN_A']:
-                    other_buttons_pressed = True
-                    break
-            
-            if abs_z_raw >= 255 and a_button_pressed:
-                # When ABS_Z=255 AND A button pressed, set key to 288
-                keys = 288
-                self.logger.debug(f"ABS_Z={abs_z_raw}, BTN_A pressed, setting keys=288")
-            elif abs_z_raw >= 255:
-                # When ABS_Z=255 (without A button), set key to 32
-                keys = 32
-                self.logger.debug(f"ABS_Z={abs_z_raw}, BTN_A not pressed, setting keys=32")
-            elif a_button_pressed and not other_buttons_pressed and abs_z_raw < 255:
-                # A button only (no other buttons, no ABS_Z=255) -> keys = 4
-                keys = 4
-                self.logger.debug(f"BTN_A only pressed (no other buttons, ABS_Z={abs_z_raw}), setting keys=4")
-            # Otherwise, use normal button mapping (keys already calculated above)
+        # Check if other mapped buttons are pressed (for "A button only" logic)
+        other_buttons_pressed = False
+        for button_name, pressed in self.buttons_raw.items():
+            # Check if this button is NOT the one mapped to btn_a or l2 role
+            etype, ecode = self.event_map.get((ecodes.EV_KEY, getattr(ecodes, button_name, None)), (None, None))
+            mapped_role = self.event_map.get((ecodes.EV_KEY, getattr(ecodes, button_name, None)))
+            if pressed and mapped_role not in ['btn_a', 'l2']:
+                other_buttons_pressed = True
+                break
+        
+        if l2_pressed and a_button_pressed:
+            keys = 288
+            self.logger.debug(f"L2 pressed, BTN_A pressed, setting keys=288")
+        elif l2_pressed:
+            keys = 32
+            self.logger.debug(f"L2 pressed, setting keys=32")
+        elif a_button_pressed and not other_buttons_pressed:
+            keys = 4
+            self.logger.debug(f"BTN_A only pressed, setting keys=4")
         
         state['keys'] = keys & 0xFFFF  # Ensure uint16
         
@@ -144,46 +226,48 @@ class JoystickReader:
                 self.logger.warning(f"JoystickReader: Failed to put state in queue: {e2}")
     
     def process_event(self, event):
-        """Process joystick event and update state"""
-        if event.type == ecodes.EV_ABS:
-            # Analog stick/trigger event
-            if event.code in ecodes.ABS:
-                axis_name = ecodes.ABS[event.code]
-                # Handle tuple (some codes map to multiple names)
-                if isinstance(axis_name, tuple):
-                    axis_name = axis_name[0]
-                axis_name = str(axis_name)
-            else:
-                axis_name = f"ABS_{event.code}"
-            normalized_value = self.normalize_axis(event.value)
-            self.axes_raw[axis_name] = normalized_value
-            self.axes_raw_values[axis_name] = event.value  # Store raw value
-            self.update_wireless_controller_state()
-            self.logger.debug(f"Event: {axis_name} = {event.value} (normalized: {normalized_value})")
-            return True
-        elif event.type == ecodes.EV_KEY:
-            # Button event
-            if event.code in ecodes.BTN:
-                button_name = ecodes.BTN[event.code]
-                # Handle tuple (some codes map to multiple names)
-                if isinstance(button_name, tuple):
-                    button_name = button_name[0]
-                button_name = str(button_name)
-            else:
-                button_name = f"BTN_{event.code}"
-            self.buttons_raw[button_name] = event.value
-            self.update_wireless_controller_state()
-            button_state = "pressed" if event.value else "released"
-            self.logger.debug(f"Event: {button_name} {button_state}")
-            return True
+        """Process joystick event and update state using role-based event_map"""
+        # Log all events as requested
+        self.logger.info(f"JoystickReader: Received event: type={event.type}, code={event.code}, value={event.value}")
+        
+        mapping = self.event_map.get((event.type, event.code))
+        
+        if mapping:
+            if event.type == ecodes.EV_ABS:
+                self.logger.debug(f"Axis event: role={mapping}, code={event.code}, value={event.value}")
+                
+                # Update normalized value in controller_state
+                normalized_value = self.normalize_axis(event.value)
+                self.controller_state[mapping] = normalized_value
+                
+                self.update_wireless_controller_state()
+                return True
+                
+            elif mapping.startswith('btn_') or mapping in ['l1', 'r1', 'l2', 'select', 'start', 'mode', 'l3', 'r3']:
+                self.controller_state[mapping] = event.value
+                self.update_wireless_controller_state()
+                return True
+                
+            elif isinstance(mapping, tuple) and mapping[0] == 'key':
+                bit_pos = mapping[1]
+                # Find the button name from ecodes if possible
+                button_name = None
+                for name, pos in self.button_mapping.items():
+                    if pos == bit_pos:
+                        button_name = name
+                        break
+                
+                if not button_name:
+                    button_name = f"BTN_{event.code}"
+                    
+                self.buttons_raw[button_name] = event.value
+                self.update_wireless_controller_state()
+                return True
+        
         elif event.type == ecodes.EV_SYN:
-            # Synchronization event (ignore but don't print)
             return False
-        else:
-            # Other event types
-            event_type_name = ecodes.EV[event.type] if event.type in ecodes.EV else f"EV_{event.type}"
-            self.logger.debug(f"Event: {event_type_name} code={event.code} value={event.value}")
-            return False
+            
+        return False
     
     def run(self):
         """Main loop to read joystick events"""
@@ -231,6 +315,7 @@ class JoystickReader:
                     if r:
                         # Events available, read them
                         for event in device.read():
+                            self.logger.info(f"JoystickReader: Received event: type={event.type}, code={event.code}, value={event.value}")
                             if not self.running.value:
                                 self.logger.info("JoystickReader: Stopping (running=False)")
                                 break
@@ -293,17 +378,16 @@ class MQTTPublisher:
     
     @staticmethod
     def on_connect(client, userdata, flags, reason_code, properties=None):
+        logger = logging.getLogger(__name__)
         if reason_code == 0:
-            logger = logging.getLogger(__name__)
             logger.info("MQTTPublisher: Connected to MQTT broker")
         else:
-            logger = logging.getLogger(__name__)
             logger.error(f"MQTTPublisher: Failed to connect to MQTT broker, reason code {reason_code}")
     
     @staticmethod
-    def on_disconnect(client, userdata, reason_code, properties=None):
+    def on_disconnect(client, userdata, flags, reason_code, properties=None):
         logger = logging.getLogger(__name__)
-        logger.info(f"MQTTPublisher: Disconnected from MQTT broker, reason code: {reason_code}")
+        logger.info(f"MQTTPublisher: Disconnected from MQTT broker, flags: {flags}, reason code: {reason_code}")
     
     def publish_state(self, state):
         """Publish state to MQTT"""
@@ -381,13 +465,18 @@ class MQTTPublisher:
 class JoystickMQTT:
     """Main coordinator class to manage joystick reader and MQTT publisher processes"""
     
-    def __init__(self, device_path, mqtt_broker, mqtt_port, mqtt_topic, mqtt_username=None, mqtt_password=None, log_file=None):
+    def __init__(self, device_path, mqtt_broker, mqtt_port, mqtt_topic, 
+                 mqtt_username=None, mqtt_password=None, log_file=None,
+                 max_x_speed=1.0, max_y_speed=1.0, max_yaw_speed=1.0):
         self.device_path = device_path
         self.mqtt_broker = mqtt_broker
         self.mqtt_port = mqtt_port
         self.mqtt_topic = mqtt_topic
         self.mqtt_username = mqtt_username
         self.mqtt_password = mqtt_password
+        self.max_x_speed = max_x_speed
+        self.max_y_speed = max_y_speed
+        self.max_yaw_speed = max_yaw_speed
         
         # Setup logging
         if log_file is None:
@@ -408,7 +497,8 @@ class JoystickMQTT:
         # Verify device exists
         try:
             test_device = InputDevice(device_path)
-            self.logger.info(f"Found joystick device: {test_device.name}")
+            self.device_name = test_device.name
+            self.logger.info(f"Found joystick device: {self.device_name}")
             test_device.close()
         except Exception as e:
             self.logger.error(f"Error opening joystick device {device_path}: {e}")
@@ -449,10 +539,14 @@ class JoystickMQTT:
         # Create reader and publisher instances
         reader = JoystickReader(
             device_path=self.device_path,
+            device_name=self.device_name,
             state_queue=self.state_queue,
             running=self.running,
             button_mapping=self.button_mapping,
-            log_file=self.log_file
+            log_file=self.log_file,
+            max_x_speed=self.max_x_speed,
+            max_y_speed=self.max_y_speed,
+            max_yaw_speed=self.max_yaw_speed
         )
         
         publisher = MQTTPublisher(
@@ -519,6 +613,12 @@ def main():
                        help='Publish interval in seconds (default: 0.1)')
     parser.add_argument('--log-file', '-l', type=str, default=None,
                        help='Log file path (default: joystick_mqtt.py.log)')
+    parser.add_argument('--max-x-speed', type=float, default=0.5,
+                       help='Max X speed in m/s (default: 0.5)')
+    parser.add_argument('--max-y-speed', type=float, default=0.5,
+                       help='Max Y speed in m/s (default: 0.5)')
+    parser.add_argument('--max-yaw-speed', type=float, default=0.5,
+                       help='Max Yaw speed in rad/s (default: 0.5)')
     
     args = parser.parse_args()
     
@@ -558,7 +658,10 @@ def main():
             mqtt_topic=args.topic,
             mqtt_username=args.username,
             mqtt_password=args.password,
-            log_file=args.log_file
+            log_file=args.log_file,
+            max_x_speed=args.max_x_speed,
+            max_y_speed=args.max_y_speed,
+            max_yaw_speed=args.max_yaw_speed
         )
         joystick_mqtt.run(publish_interval=args.interval)
     except Exception as e:
