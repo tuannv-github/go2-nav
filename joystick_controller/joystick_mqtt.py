@@ -14,6 +14,8 @@ import os
 import sys
 from datetime import datetime
 from evdev import InputDevice, categorize, ecodes
+import requests
+import threading
 import paho.mqtt.client as mqtt
 
 # Import device detection functions from list_joystick_devices
@@ -37,6 +39,7 @@ DEVICE_CONFIGS = {
         "ry": (ecodes.EV_ABS, ecodes.ABS_RY),
         "l2": (ecodes.EV_KEY, ecodes.BTN_TL2),
         "btn_a": (ecodes.EV_KEY, ecodes.BTN_SOUTH),
+        "btn_y": (ecodes.EV_KEY, ecodes.BTN_NORTH),
         "axis_min": -32768,
         "axis_max": 32767,
     },
@@ -62,6 +65,7 @@ DEVICE_CONFIGS = {
         "ry": (ecodes.EV_ABS, ecodes.ABS_RZ),
         "l2": (ecodes.EV_KEY, ecodes.BTN_TL2),
         "btn_a": (ecodes.EV_KEY, ecodes.BTN_A),
+        "btn_y": (ecodes.EV_KEY, ecodes.BTN_Y),
         "axis_min": 0,
         "axis_max": 255,
     }
@@ -114,6 +118,10 @@ class JoystickReader:
         self.axis_min = self.config["axis_min"]
         self.axis_max = self.config["axis_max"]
         
+        # Rate limiting for anomaly detection
+        self.last_anomaly_trigger_time = 0
+        self.anomaly_lock = threading.Lock()
+        
         # Current normalized state of axes and special buttons
         self.controller_state = {
             'lx': 0.0, 'ly': 0.0, 'rx': 0.0, 'ry': 0.0, 'btn_a': 0, 'btn_b': 0,
@@ -134,6 +142,29 @@ class JoystickReader:
             if hasattr(ecodes, btn_name):
                 code = getattr(ecodes, btn_name)
                 self.event_map[(ecodes.EV_KEY, code)] = ('key', bit_pos)
+
+    def trigger_anomaly_detection(self):
+        """Send POST request for anomaly detection with rate limiting"""
+        now = time.time()
+        
+        with self.anomaly_lock:
+            if now - self.last_anomaly_trigger_time < 30:
+                self.logger.info(f"************* Anomaly detection skipped (rate limit: {30 - (now - self.last_anomaly_trigger_time):.1f}s remaining)")
+                return
+            self.last_anomaly_trigger_time = now
+
+        url = 'http://10.1.101.216:8081/api/demo/anomaly-detection'
+        headers = {'accept': 'application/json'}
+        
+        def send_request():
+            try:
+                self.logger.info(f"************* Triggering anomaly detection API: {url}")
+                response = requests.post(url, headers=headers, data='', timeout=5)
+                self.logger.info(f"************* Anomaly detection response: {response.status_code} - {response.text}")
+            except Exception as e:
+                self.logger.error(f"************* Error calling anomaly detection API: {e}")
+        
+        threading.Thread(target=send_request, daemon=True).start()
 
     def normalize_axis(self, value):
         """Normalize axis value to range [-1.0, 1.0] using configured ranges"""
@@ -246,6 +277,11 @@ class JoystickReader:
             elif mapping.startswith('btn_') or mapping in ['l1', 'r1', 'l2', 'select', 'start', 'mode', 'l3', 'r3']:
                 self.controller_state[mapping] = event.value
                 self.update_wireless_controller_state()
+                
+                # Trigger anomaly detection on button press (btn_y)
+                if mapping == 'btn_y' and event.value == 1:
+                    self.trigger_anomaly_detection()
+                    
                 return True
                 
             elif isinstance(mapping, tuple) and mapping[0] == 'key':
@@ -315,12 +351,9 @@ class JoystickReader:
                     if r:
                         # Events available, read them
                         for event in device.read():
-                            self.logger.info(f"JoystickReader: Received event: type={event.type}, code={event.code}, value={event.value}")
                             if not self.running.value:
                                 self.logger.info("JoystickReader: Stopping (running=False)")
                                 break
-                            # Log that we received an event
-                            self.logger.debug(f"JoystickReader: Received event: type={event.type}, code={event.code}, value={event.value}")
                             self.process_event(event)
                     else:
                         # No events, log periodically to show we're alive
