@@ -7,3 +7,6 @@
 [submodule "src/go2_robot"]
 	path = src/go2_robot
 	url = https://github.com/Unitree-Go2-Robot/go2_robot.git
+[submodule "3rdparties/stream"]
+	path = 3rdparties/stream
+	url = https://github.com/tuannv-github/stream.git
