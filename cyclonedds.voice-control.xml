@@ -3,7 +3,7 @@
   <Domain id="any">
     <General>
       <Interfaces>
-        <!-- <NetworkInterface name="eth0" priority="default" multicast="default" /> -->
+        <NetworkInterface name="eth0" priority="default" multicast="default" />
         <NetworkInterface name="wlan0" priority="default" multicast="default" />
       </Interfaces>
     </General>
