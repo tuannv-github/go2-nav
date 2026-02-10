@@ -143,26 +143,31 @@ class JoystickReader:
                 code = getattr(ecodes, btn_name)
                 self.event_map[(ecodes.EV_KEY, code)] = ('key', bit_pos)
 
-    def trigger_anomaly_detection(self):
-        """Send POST request for anomaly detection with rate limiting"""
+    def send_anomaly_command(self, action):
+        """Send POST request to anomaly demo API
+        action: 'detected', 'ignore', or 'accept'
+        """
+        # Rate limiting mainly to prevent accidental double-presses
+        # For 'detected', we might want slightly longer debounce
         now = time.time()
         
         with self.anomaly_lock:
-            if now - self.last_anomaly_trigger_time < 30:
-                self.logger.info(f"************* Anomaly detection skipped (rate limit: {30 - (now - self.last_anomaly_trigger_time):.1f}s remaining)")
+            # Simple debounce of 1.0s for all actions to prevent double-sends
+            if now - self.last_anomaly_trigger_time < 0.5:
+                # self.logger.debug(f"Action {action} skipped (debounce)")
                 return
             self.last_anomaly_trigger_time = now
 
-        url = 'http://10.1.101.216:8081/api/demo/anomaly-detection'
+        url = f'http://10.1.101.216:8081/api/demo/anomaly/{action}'
         headers = {'accept': 'application/json'}
         
         def send_request():
             try:
-                self.logger.info(f"************* Triggering anomaly detection API: {url}")
+                self.logger.info(f"************* Sending anomaly command: {action} ({url})")
                 response = requests.post(url, headers=headers, data='', timeout=5)
-                self.logger.info(f"************* Anomaly detection response: {response.status_code} - {response.text}")
+                self.logger.info(f"************* Anomaly {action} response: {response.status_code} - {response.text}")
             except Exception as e:
-                self.logger.error(f"************* Error calling anomaly detection API: {e}")
+                self.logger.error(f"************* Error calling anomaly {action} API: {e}")
         
         threading.Thread(target=send_request, daemon=True).start()
 
@@ -278,9 +283,14 @@ class JoystickReader:
                 self.controller_state[mapping] = event.value
                 self.update_wireless_controller_state()
                 
-                # Trigger anomaly detection on button press (btn_y)
-                if mapping == 'btn_y' and event.value == 1:
-                    self.trigger_anomaly_detection()
+                # Trigger anomaly detection actions
+                if event.value == 1:  # Button press only
+                    if mapping == 'btn_y':
+                        self.send_anomaly_command('detected')
+                    elif mapping == 'btn_x':
+                        self.send_anomaly_command('ignore')
+                    elif mapping == 'btn_b':
+                        self.send_anomaly_command('accept')
                     
                 return True
                 
