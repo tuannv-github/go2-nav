@@ -83,18 +83,17 @@ def launch_setup(context, *args, **kwargs):
         else:
             print(f"[go2_rtabmap] Provided database path does not exist, will create new: {database_path}")
     else:
-        # Only use database from project map directory
+        # Mapping launch defaults to a fresh session:
+        # always start without preloading existing map DB.
         workspace_dir = get_workspace_root()
         map_db_path = os.path.join(workspace_dir, 'map', 'rtabmap.db')
         database_path = map_db_path
-        
+        database_exists = False
         if os.path.exists(map_db_path):
-            database_exists = True
-            print(f"[go2_rtabmap] RTAB-Map database found in map directory: {database_path}")
+            print(f"[go2_rtabmap] Existing DB detected but ignored for fresh mapping: {database_path}")
         else:
-            database_exists = False
             print(f"[go2_rtabmap] No database found in map directory, will create new: {database_path}")
-            print(f"  (Database will be saved to: {database_path})")
+        print(f"  (Database will be saved to: {database_path})")
 
     vslam_params = {
         'frame_id': 'base_link',

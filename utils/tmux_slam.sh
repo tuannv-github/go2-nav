@@ -50,6 +50,7 @@ kill_previous_children() {
     pkill -f '[r]os2 launch go2_controller go2_controller\.launch\.py' 2>/dev/null || true
     pkill -f '[r]os2 launch realsense_video_publisher video_publisher\.launch\.py' 2>/dev/null || true
     pkill -f '[r]os2 launch go2_nav realsense\.launch\.py' 2>/dev/null || true
+    pkill -f '[r]os2 launch go2_nav imu_timestamp_fixer\.launch\.py' 2>/dev/null || true
     pkill -f '[r]os2 launch go2_nav go2_rtabmap\.location\.launch\.py' 2>/dev/null || true
 
     sleep 0.5
@@ -81,10 +82,17 @@ run_pane_cmd 0 "cd $PROJECT_DIR/utils && ./run_go2_controller.sh"
 run_pane_cmd 1 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch realsense_video_publisher video_publisher.launch.py"
 
 # Pane 2: Go2 Nav Realsense
-run_pane_cmd 2 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch go2_nav realsense.launch.py"
+run_pane_cmd 2 "cd $PROJECT_DIR && source ./setup.sh && export CYCLONEDDS_URI=file://$PROJECT_DIR/cyclonedds.realsense.xml && ros2 launch go2_nav realsense.launch.py"
 
 # Pane 3: Go2 Nav RTAB-Map
 run_pane_cmd 3 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch go2_nav go2_rtabmap.location.launch.py"
+
+# Separate window: IMU timestamp fixer (dedicated DDS profile)
+if tmux list-windows -t $SESSION -F '#{window_name}' | grep -q '^imu_fixer$'; then
+    tmux kill-window -t $SESSION:imu_fixer
+fi
+tmux new-window -t $SESSION -n imu_fixer -c "$PROJECT_DIR"
+tmux send-keys -t "$SESSION:imu_fixer" "cd $PROJECT_DIR && source ./setup.sh && export CYCLONEDDS_URI=file://$PROJECT_DIR/cyclonedds.fixer.xml && ros2 launch go2_nav imu_timestamp_fixer.launch.py" C-m
 
 # Finalize
 tmux select-pane -t $SESSION:0.0

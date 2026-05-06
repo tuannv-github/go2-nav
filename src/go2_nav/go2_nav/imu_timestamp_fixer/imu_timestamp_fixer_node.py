@@ -19,10 +19,12 @@ class ImuTimestampFixer(Node):
         self.declare_parameter('input_topic', '/utlidar/imu')
         self.declare_parameter('output_topic', '/input/imu')
         self.declare_parameter('frame_id', 'utlidar_imu')  # Keep original frame_id
+        self.declare_parameter('invert_gyro_z', True)
         
         input_topic = self.get_parameter('input_topic').get_parameter_value().string_value
         output_topic = self.get_parameter('output_topic').get_parameter_value().string_value
         self.frame_id = self.get_parameter('frame_id').get_parameter_value().string_value
+        self.invert_gyro_z = self.get_parameter('invert_gyro_z').get_parameter_value().bool_value
         
         # Subscriber
         self.subscription = self.create_subscription(
@@ -40,9 +42,17 @@ class ImuTimestampFixer(Node):
         )
         
         self.get_logger().info(f'IMU Timestamp Fixer started: {input_topic} -> {output_topic}')
+        self.get_logger().info(f'IMU axis correction: invert_gyro_z={self.invert_gyro_z}')
         self.orientation_warned = False
+        self._last_rx_log_sec = -1.0
     
     def imu_callback(self, msg):
+        # Throttled receive log (1 Hz) to confirm upstream IMU is alive.
+        now = self.get_clock().now().nanoseconds * 1e-9
+        if now - self._last_rx_log_sec >= 1.0:
+            self.get_logger().info('Received IMU message on input topic')
+            self._last_rx_log_sec = now
+
         # Create new message with current timestamp
         new_msg = Imu()
         
@@ -53,6 +63,8 @@ class ImuTimestampFixer(Node):
         new_msg.angular_velocity_covariance = msg.angular_velocity_covariance
         new_msg.linear_acceleration = msg.linear_acceleration
         new_msg.linear_acceleration_covariance = msg.linear_acceleration_covariance
+        if self.invert_gyro_z:
+            new_msg.angular_velocity.z = -new_msg.angular_velocity.z
         
         # Check if orientation is valid (not all zeros)
         orientation_valid = not (msg.orientation.x == 0.0 and msg.orientation.y == 0.0 and 

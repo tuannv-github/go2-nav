@@ -99,6 +99,7 @@ def launch_setup(context, *args, **kwargs):
     vslam_params = {
         'frame_id': 'base_link',
         'guess_frame_id': 'vo',  # Use 'vo' since rgbd_odometry publishes to 'vo', not 'odom'
+        'Reg/Force3DoF': 'true',  # Constrain visual odometry to planar motion (z/roll/pitch fixed)
         'approx_sync': False,
         'use_sim_time': use_sim_time,
         'subscribe_rgbd': True,
@@ -109,7 +110,7 @@ def launch_setup(context, *args, **kwargs):
         'database_path': database_path,
         # RTAB-Map's parameters should be strings
         'Grid/DepthDecimation': '1',
-        'Grid/RangeMax': '2',
+        'Grid/RangeMax': '3',
         'GridGlobal/MinSize': '20',
         'Grid/MinClusterSize': '20',
         'Grid/MaxObstacleHeight': '2',
@@ -117,7 +118,7 @@ def launch_setup(context, *args, **kwargs):
         'Kp/RoiRatios': '0.0 0.0 0.0 0.4'  # ignore ground for loop closure detection
     }
     
-    # IMU topic selection: Always use timestamp-fixed IMU from /input/imu (filtered if filter_imu is enabled)
+    # IMU topic selection: use timestamp-fixed IMU (filtered if filter_imu is enabled)
     imu_topic = '/input/imu/filtered' if filter_imu_enabled else '/input/imu'
     
     vslam_remappings = [
@@ -129,40 +130,6 @@ def launch_setup(context, *args, **kwargs):
         vslam_remappings.append(('imu', imu_topic))
     
     return [
-        # IMU timestamp fixer - republishes IMU with fresh timestamps
-        # This fixes issues where IMU timestamps are stale or incorrect
-        # Always enabled to ensure proper timestamp synchronization
-        Node(
-            package='go2_nav',
-            executable='imu_timestamp_fixer_node.py',
-            name='imu_timestamp_fixer',
-            output='screen',
-            parameters=[{
-                'input_topic': '/utlidar/imu',
-                'output_topic': '/input/imu',
-                'frame_id': 'utlidar_imu'
-            }]
-        ),
-        
-        # Compute imu orientation (if needed, otherwise use raw IMU)
-        # Note: Go2's IMU might already be filtered, adjust if needed
-        # Always uses timestamp-fixed IMU from /input/imu
-        Node(
-            package='imu_filter_madgwick',
-            executable='imu_filter_madgwick_node',
-            output='screen',
-            parameters=[{
-                'use_mag': False,
-                'world_frame': 'enu',
-                'publish_tf': False
-            }],
-            remappings=[
-                ('imu/data_raw', '/input/imu'),
-                ('imu/data', '/input/imu/filtered')
-            ],
-            condition=IfCondition(LaunchConfiguration("filter_imu"))
-        ),
-        
         # VSLAM nodes:
         Node(
             package='rtabmap_sync',
@@ -244,7 +211,7 @@ def generate_launch_description():
 
         DeclareLaunchArgument(
             name='use_imu',
-            default_value='',
+            default_value='false',
             description='Enable/disable IMU usage. Empty = auto (disabled when use_sim_time is true, enabled otherwise). Set to "true" or "false" to override.',
         ),
 

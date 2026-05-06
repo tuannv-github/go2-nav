@@ -17,6 +17,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import SetParameter, PushRosNamespace, Node
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction, OpaqueFunction
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
@@ -82,6 +83,11 @@ def generate_launch_description():
         default_value='false',
         description='Enable pointcloud generation'
     )
+    declare_filter_imu = DeclareLaunchArgument(
+        'filter_imu',
+        default_value='true',
+        description='Enable imu_filter_madgwick to publish /input/imu/filtered'
+    )
     
     # Camera transform parameters (adjust based on your camera mounting)
     declare_camera_x = DeclareLaunchArgument(
@@ -96,7 +102,7 @@ def generate_launch_description():
     )
     declare_camera_z = DeclareLaunchArgument(
         'camera_z',
-        default_value='0.22',
+        default_value='0.5',
         description='Z offset of camera from base_link (meters, up)'
     )
     declare_camera_roll = DeclareLaunchArgument(
@@ -127,6 +133,7 @@ def generate_launch_description():
         declare_align_depth,
         declare_enable_sync,
         declare_pointcloud,
+        declare_filter_imu,
         declare_camera_x,
         declare_camera_y,
         declare_camera_z,
@@ -214,7 +221,25 @@ def launch_setup(context, *args, **kwargs):
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_utlidar_imu',
-            arguments=['0', '0', '0', '0', '0', '0', '1', 'base_link', 'utlidar_imu']
+            arguments=['0', '0', '0', '0', '0', '1', '0', 'base_link', 'utlidar_imu']
+        ),
+
+        # IMU filter (Madgwick) in input namespace
+        Node(
+            package='imu_filter_madgwick',
+            executable='imu_filter_madgwick_node',
+            namespace='input',
+            output='screen',
+            parameters=[{
+                'use_mag': False,
+                'world_frame': 'enu',
+                'publish_tf': False,
+            }],
+            remappings=[
+                ('imu/data_raw', '/input/imu'),
+                ('imu/data', '/input/imu/filtered'),
+            ],
+            condition=IfCondition(LaunchConfiguration('filter_imu'))
         ),
         
         # Launch RealSense camera driver under /input/camera namespace
