@@ -4,3 +4,6 @@
 [submodule "3rdparties/stream"]
 	path = 3rdparties/stream
 	url = https://github.com/tuannv-github/stream.git
+[submodule "3rdparties/livox/livox_ros_driver2"]
+	path = 3rdparties/livox/livox_ros_driver2
+	url = https://github.com/Livox-SDK/livox_ros_driver2.git

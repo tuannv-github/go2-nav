@@ -8,6 +8,8 @@
   <license>TODO: License declaration</license>
 
   <exec_depend>realsense2_camera</exec_depend>
+  <exec_depend>rplidar_ros</exec_depend>
+  <exec_depend>livox_ros_driver2</exec_depend>
   <exec_depend>ros-humble-image-transport-plugins</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>

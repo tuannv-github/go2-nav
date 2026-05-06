@@ -15,6 +15,7 @@ setup(
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py') + glob('launch/*.launch.*.py')),
         (os.path.join('share', package_name, 'params'), glob('params/*.yaml')),
         (os.path.join('share', package_name, 'rviz'), glob('rviz/*.rviz')),
+        (os.path.join('share', package_name, 'config'), glob('config/*')),
         # Install Python scripts as executables
         ('lib/' + package_name, [
             os.path.join('go2_nav', 'imu_timestamp_fixer', 'imu_timestamp_fixer_node.py'),

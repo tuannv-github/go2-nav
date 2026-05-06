@@ -1,0 +1,11 @@
+# RPLidar USB–serial (Slamtec / ros-humble-rplidar-ros baseline).
+# CP210x bridge (common on RPLidar USB adapters): vendor 10c4, product ea60
+# Same match as ros-humble-rplidar-ros (/lib/udev/rules.d/60-ros-humble-rplidar-ros.rules).
+KERNEL=="ttyUSB*", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", MODE:="0666", SYMLINK+="rplidar"
+
+# If your adapter is different, uncomment one block and run scripts/install_rplidar_udev.sh again.
+# CH340 / CH341
+#KERNEL=="ttyUSB*", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", MODE:="0666", SYMLINK+="rplidar"
+
+# FTDI FT232
+#KERNEL=="ttyUSB*", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", MODE:="0666", SYMLINK+="rplidar"
