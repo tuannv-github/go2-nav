@@ -25,24 +25,39 @@ fi
 tmux select-layout -t $SESSION:0 tiled
 sleep 1 # Wait for layout to settle and shell prompts to appear
 
+# Function to check if pane exists and is alive
+pane_exists() {
+    local pane_idx=$1
+    tmux list-panes -t "$SESSION:0" -F '#{pane_index}' 2>/dev/null | grep -q "^${pane_idx}$"
+}
+
+# Function to check if a command is running in pane (not just shell)
+pane_is_idle() {
+    local pane_idx=$1
+    local current_cmd=$(tmux display-message -p -t "$SESSION:0.$pane_idx" "#{pane_current_command}" 2>/dev/null)
+    [[ "$current_cmd" =~ ^(zsh|bash|sh)$ ]]
+}
+
 # Function to run command if a pane is idle
 run_if_idle() {
     local pane_idx=$1
     local cmd=$2
     
-    # Get current command running in pane
-    local current_cmd=$(tmux display-message -p -t "$SESSION:0.$pane_idx" "#{pane_current_command}")
-    
-    # If it's a shell, we can send commands
-    if [[ "$current_cmd" =~ ^(zsh|bash|sh)$ ]]; then
-        echo "Updating Pane $pane_idx..."
-        # C-u: Clear line, C-c: Interrupt any partial command, C-l: Clear screen
-        tmux send-keys -t "$SESSION:0.$pane_idx" C-c C-u
-        sleep 0.2
-        tmux send-keys -t "$SESSION:0.$pane_idx" "$cmd" C-m
-    else
-        echo "Pane $pane_idx is busy (running '$current_cmd'). Skipping."
+    if ! pane_exists "$pane_idx"; then
+        echo "Pane $pane_idx does not exist. Skipping."
+        return 1
     fi
+    
+    if ! pane_is_idle "$pane_idx"; then
+        local current_cmd=$(tmux display-message -p -t "$SESSION:0.$pane_idx" "#{pane_current_command}" 2>/dev/null)
+        echo "Pane $pane_idx is busy (running '$current_cmd'). Skipping."
+        return 1
+    fi
+    
+    echo "Updating Pane $pane_idx..."
+    tmux send-keys -t "$SESSION:0.$pane_idx" C-c C-u
+    sleep 0.2
+    tmux send-keys -t "$SESSION:0.$pane_idx" "$cmd" C-m
 }
 
 # Distribute commands
@@ -56,7 +71,7 @@ run_if_idle 1 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch realsense_vid
 run_if_idle 2 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch go2_nav realsense.launch.py"
 
 # Pane 3: Go2 Nav RTAB-Map
-run_if_idle 3 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch go2_nav go2_rtabmap.launch.py | tee go2_rtabmap.launch.py.log"
+run_if_idle 3 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch go2_nav go2_rtabmap.location.launch.py | tee go2_rtabmap.launch.py.log"
 
 # Finalize
 tmux select-pane -t $SESSION:0.0

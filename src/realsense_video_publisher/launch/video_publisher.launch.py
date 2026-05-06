@@ -29,7 +29,7 @@ def generate_launch_description():
     
     stream_host_arg = DeclareLaunchArgument(
         'stream_host',
-        default_value='129.126.114.218',
+        default_value='10.1.106.210',
         description='Host address for video stream (RTMP/UDP/RTP)'
     )
     

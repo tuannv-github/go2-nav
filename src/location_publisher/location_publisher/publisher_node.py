@@ -13,7 +13,7 @@ class LocationPublisher(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         
-        self.url = 'http://10.1.101.216:8086/api/demo/ue-location'
+        self.url = 'http://10.1.101.216:8081/api/demo/ue-location'
         self.supi = 'imsi-001010000000009'
         
         # Timer to publish every 1 second

@@ -12,6 +12,14 @@
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>rtabmap_viz</exec_depend>
 
+  <!-- RTAB-Map nodes used by go2_rtabmap*.launch.py (rgbd_sync, rgbd_odometry, rtabmap) -->
+  <exec_depend>rtabmap_odom</exec_depend>
+  <exec_depend>rtabmap_slam</exec_depend>
+  <exec_depend>rtabmap_sync</exec_depend>
+
+  <!-- Optional: used when filter_imu:=true -->
+  <exec_depend>imu_filter_madgwick</exec_depend>
+
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
