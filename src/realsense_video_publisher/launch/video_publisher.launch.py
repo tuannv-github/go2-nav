@@ -47,8 +47,8 @@ def generate_launch_description():
     
     bitrate_arg = DeclareLaunchArgument(
         'bitrate',
-        default_value='2000000',
-        description='Video bitrate in bps (for NVIDIA encoder) or kbps (for software encoder). Default: 2000000 (2Mbps)'
+        default_value='6000000',
+        description='Video bitrate in bps (for NVIDIA encoder) or kbps (for software encoder). Default: 6000000 (6Mbps)'
     )
     
     fps_arg = DeclareLaunchArgument(

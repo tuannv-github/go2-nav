@@ -1,20 +1,16 @@
 cmake_minimum_required(VERSION 3.5)
-project(joystick_controller)
+project(go2_controller)
 
-# Find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 
-# Install Python modules
 ament_python_install_package(${PROJECT_NAME})
 
-# Install Python scripts
 install(PROGRAMS
-  scripts/mqtt_to_ros2_bridge.py
+  scripts/go2_controller_bridge.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# Install launch files
 install(DIRECTORY
   launch
   DESTINATION share/${PROJECT_NAME}

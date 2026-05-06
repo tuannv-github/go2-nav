@@ -46,6 +46,12 @@ def generate_launch_description():
         default_value='true',
         description='Enable color stream'
     )
+
+    declare_rgb_camera_profile = DeclareLaunchArgument(
+        'rgb_camera.color_profile',
+        default_value='1280x720x15',
+        description='Color stream profile (widthxheightxfps)'
+    )
     
     declare_enable_gyro = DeclareLaunchArgument(
         'enable_gyro',
@@ -115,6 +121,7 @@ def generate_launch_description():
         declare_serial_no,
         declare_enable_depth,
         declare_enable_color,
+        declare_rgb_camera_profile,
         declare_enable_gyro,
         declare_enable_accel,
         declare_align_depth,
@@ -136,6 +143,7 @@ def launch_setup(context, *args, **kwargs):
     serial_no = LaunchConfiguration('serial_no')
     enable_depth = LaunchConfiguration('enable_depth')
     enable_color = LaunchConfiguration('enable_color')
+    rgb_camera_profile = LaunchConfiguration('rgb_camera.color_profile')
     enable_gyro = LaunchConfiguration('enable_gyro')
     enable_accel = LaunchConfiguration('enable_accel')
     align_depth = LaunchConfiguration('align_depth')
@@ -147,6 +155,7 @@ def launch_setup(context, *args, **kwargs):
         'camera_name': camera_name,
         'enable_depth': enable_depth,
         'enable_color': enable_color,
+        'rgb_camera.color_profile': rgb_camera_profile,
         'enable_gyro': enable_gyro,
         'enable_accel': enable_accel,
         'align_depth.enable': align_depth,

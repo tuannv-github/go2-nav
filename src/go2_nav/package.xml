@@ -10,6 +10,9 @@
   <exec_depend>realsense2_camera</exec_depend>
   <exec_depend>ros-humble-image-transport-plugins</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
   <exec_depend>rtabmap_viz</exec_depend>
 
   <!-- RTAB-Map nodes used by go2_rtabmap*.launch.py (rgbd_sync, rgbd_odometry, rtabmap) -->
@@ -19,6 +22,9 @@
 
   <!-- Optional: used when filter_imu:=true -->
   <exec_depend>imu_filter_madgwick</exec_depend>
+
+  <!-- Nav2 (go2_nav2.launch.py) -->
+  <exec_depend>nav2_bringup</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

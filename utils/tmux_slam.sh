@@ -46,6 +46,8 @@ kill_previous_children() {
     sleep 1
 
     pkill -f '[r]un_mqtt_to_ros2\.sh' 2>/dev/null || true
+    pkill -f '[r]un_go2_controller\.sh' 2>/dev/null || true
+    pkill -f '[r]os2 launch go2_controller go2_controller\.launch\.py' 2>/dev/null || true
     pkill -f '[r]os2 launch realsense_video_publisher video_publisher\.launch\.py' 2>/dev/null || true
     pkill -f '[r]os2 launch go2_nav realsense\.launch\.py' 2>/dev/null || true
     pkill -f '[r]os2 launch go2_nav go2_rtabmap\.location\.launch\.py' 2>/dev/null || true
@@ -72,8 +74,8 @@ run_pane_cmd() {
 }
 
 # Distribute commands
-# Pane 0: Joystick Controller
-run_pane_cmd 0 "cd $PROJECT_DIR/joystick_controller && ./run_mqtt_to_ros2.sh"
+# Pane 0: utils/run_go2_controller.sh — MQTT + Nav /cmd_vel → /wirelesscontroller (cyclonedds.go2.xml)
+run_pane_cmd 0 "cd $PROJECT_DIR/utils && ./run_go2_controller.sh"
 
 # Pane 1: Realsense Video Publisher
 run_pane_cmd 1 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch realsense_video_publisher video_publisher.launch.py"
