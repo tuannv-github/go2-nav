@@ -58,6 +58,8 @@ def launch_setup(context, *args, **kwargs):
     localization = LaunchConfiguration('localization')
     use_sim_time = LaunchConfiguration('use_sim_time')
     use_imu_arg = LaunchConfiguration('use_imu')
+    rtab_cpu_affinity = LaunchConfiguration('rtab_cpu_affinity').perform(context)
+    rtab_prefix = f'taskset -c {rtab_cpu_affinity}'
 
     # Default: disable IMU if use_sim_time is true, or if explicitly disabled
     use_imu_enabled = use_imu_arg.perform(context) == 'true'
@@ -134,6 +136,7 @@ def launch_setup(context, *args, **kwargs):
             package='rtabmap_sync',
             executable='rgbd_sync',
             output='screen',
+            prefix=rtab_prefix,
             parameters=[vslam_params],
             remappings=[
                 ('rgb/image', '/input/camera/camera/color/image_raw'),
@@ -146,6 +149,7 @@ def launch_setup(context, *args, **kwargs):
             package='rtabmap_odom',
             executable='rgbd_odometry',
             output='screen',
+            prefix=rtab_prefix,
             parameters=[vslam_params, {'odom_frame_id': 'vo'}],
             remappings=vslam_remappings,
             arguments=["--ros-args", "--log-level", 'info']
@@ -157,6 +161,7 @@ def launch_setup(context, *args, **kwargs):
             package='rtabmap_slam',
             executable='rtabmap',
             output='screen',
+            prefix=rtab_prefix,
             parameters=[vslam_params] + ([
                 {'Mem/InitWMWithAllNodes': 'True'}  # Load all nodes from existing database
             ] if database_exists else []),
@@ -170,6 +175,7 @@ def launch_setup(context, *args, **kwargs):
             package='rtabmap_slam',
             executable='rtabmap',
             output='screen',
+            prefix=rtab_prefix,
             parameters=[vslam_params, 
                 {
                     'Mem/IncrementalMemory': 'False',
@@ -218,6 +224,11 @@ def generate_launch_description():
             'database_path',
             default_value='',
             description='Path to RTAB-Map database file. If not provided, uses PROJECT_ROOT_DIR/map/rtabmap.db. The map will be automatically saved to the specified or default location.'
+        ),
+        DeclareLaunchArgument(
+            'rtab_cpu_affinity',
+            default_value='0-4',
+            description='CPU affinity for RTAB-Map nodes. Default 0-4 keeps RTAB stack within ~500% CPU total.'
         ),
         
         OpaqueFunction(function=launch_setup)
