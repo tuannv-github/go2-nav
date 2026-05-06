@@ -6,7 +6,6 @@ This launch file starts RTAB-Map visualization tool for viewing maps, graphs, an
 
 Example:
     ros2 launch go2_nav go2_rtabmap_viz.launch.py
-    ros2 launch go2_nav go2_rtabmap_viz.launch.py use_sim_time:=true
 """
 
 from launch import LaunchDescription
@@ -16,10 +15,9 @@ from launch_ros.actions import Node
 
 
 def launch_setup(context, *args, **kwargs):
-    
-    use_sim_time = LaunchConfiguration("use_sim_time")
+    use_sim_time = LaunchConfiguration('use_sim_time')
     filter_imu_enabled = LaunchConfiguration('filter_imu').perform(context) == 'true'
-    
+
     vslam_params = {
         'frame_id': 'base_link',
         'guess_frame_id': 'odom',
@@ -69,11 +67,11 @@ def generate_launch_description():
     
     return LaunchDescription([
         DeclareLaunchArgument(
-            name='use_sim_time', 
+            name='use_sim_time',
             default_value='false',
-            description='Use simulation (Gazebo) clock if true'
+            choices=['true', 'false'],
+            description='Simulation / bag replay clock: true uses /clock. Default false (wall clock / robot).',
         ),
-        
         DeclareLaunchArgument(
             name='imu_topic',
             default_value='',

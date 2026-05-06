@@ -6,7 +6,6 @@ This launch file starts RViz2 with the Go2 navigation configuration.
 
 Example:
     ros2 launch go2_nav go2_rviz.launch.py
-    ros2 launch go2_nav go2_rviz.launch.py use_sim_time:=true
 """
 
 from launch import LaunchDescription
@@ -21,16 +20,15 @@ def generate_launch_description():
     rviz_config_path = PathJoinSubstitution(
         [FindPackageShare('go2_nav'), 'rviz', 'go2_navigation.rviz']
     )
-    
-    use_sim_time = LaunchConfiguration("use_sim_time")
-    
+    use_sim_time = LaunchConfiguration('use_sim_time')
+
     return LaunchDescription([
         DeclareLaunchArgument(
-            name='use_sim_time', 
+            name='use_sim_time',
             default_value='false',
-            description='Use simulation (Gazebo) clock if true'
+            choices=['true', 'false'],
+            description='Simulation / bag replay: true uses /clock. Default false (robot).',
         ),
-        
         DeclareLaunchArgument(
             name='rviz_config',
             default_value=rviz_config_path,

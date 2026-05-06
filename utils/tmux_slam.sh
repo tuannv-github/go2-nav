@@ -31,30 +31,41 @@ pane_exists() {
     tmux list-panes -t "$SESSION:0" -F '#{pane_index}' 2>/dev/null | grep -q "^${pane_idx}$"
 }
 
-# Function to check if a command is running in pane (not just shell)
-pane_is_idle() {
-    local pane_idx=$1
-    local current_cmd=$(tmux display-message -p -t "$SESSION:0.$pane_idx" "#{pane_current_command}" 2>/dev/null)
-    [[ "$current_cmd" =~ ^(zsh|bash|sh)$ ]]
+# Stop prior jobs from this stack: SIGINT foreground in each pane, then targeted pkill.
+# Bracket tricks in pkill patterns avoid matching the pkill command line itself.
+kill_previous_children() {
+    echo "Stopping previous stack jobs..."
+    local pane_idx
+    for pane_idx in 0 1 2 3; do
+        if pane_exists "$pane_idx"; then
+            tmux send-keys -t "$SESSION:0.$pane_idx" C-c
+            sleep 0.4
+            tmux send-keys -t "$SESSION:0.$pane_idx" C-c
+        fi
+    done
+    sleep 1
+
+    pkill -f '[r]un_mqtt_to_ros2\.sh' 2>/dev/null || true
+    pkill -f '[r]os2 launch realsense_video_publisher video_publisher\.launch\.py' 2>/dev/null || true
+    pkill -f '[r]os2 launch go2_nav realsense\.launch\.py' 2>/dev/null || true
+    pkill -f '[r]os2 launch go2_nav go2_rtabmap\.location\.launch\.py' 2>/dev/null || true
+
+    sleep 0.5
 }
 
-# Function to run command if a pane is idle
-run_if_idle() {
+kill_previous_children
+
+# Run command in pane (cleanup already ran above)
+run_pane_cmd() {
     local pane_idx=$1
     local cmd=$2
-    
+
     if ! pane_exists "$pane_idx"; then
         echo "Pane $pane_idx does not exist. Skipping."
         return 1
     fi
-    
-    if ! pane_is_idle "$pane_idx"; then
-        local current_cmd=$(tmux display-message -p -t "$SESSION:0.$pane_idx" "#{pane_current_command}" 2>/dev/null)
-        echo "Pane $pane_idx is busy (running '$current_cmd'). Skipping."
-        return 1
-    fi
-    
-    echo "Updating Pane $pane_idx..."
+
+    echo "Starting pane $pane_idx..."
     tmux send-keys -t "$SESSION:0.$pane_idx" C-c C-u
     sleep 0.2
     tmux send-keys -t "$SESSION:0.$pane_idx" "$cmd" C-m
@@ -62,16 +73,16 @@ run_if_idle() {
 
 # Distribute commands
 # Pane 0: Joystick Controller
-run_if_idle 0 "cd $PROJECT_DIR/joystick_controller && ./run_mqtt_to_ros2.sh"
+run_pane_cmd 0 "cd $PROJECT_DIR/joystick_controller && ./run_mqtt_to_ros2.sh"
 
 # Pane 1: Realsense Video Publisher
-run_if_idle 1 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch realsense_video_publisher video_publisher.launch.py"
+run_pane_cmd 1 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch realsense_video_publisher video_publisher.launch.py"
 
 # Pane 2: Go2 Nav Realsense
-run_if_idle 2 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch go2_nav realsense.launch.py"
+run_pane_cmd 2 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch go2_nav realsense.launch.py"
 
 # Pane 3: Go2 Nav RTAB-Map
-run_if_idle 3 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch go2_nav go2_rtabmap.location.launch.py | tee go2_rtabmap.launch.py.log"
+run_pane_cmd 3 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch go2_nav go2_rtabmap.location.launch.py"
 
 # Finalize
 tmux select-pane -t $SESSION:0.0

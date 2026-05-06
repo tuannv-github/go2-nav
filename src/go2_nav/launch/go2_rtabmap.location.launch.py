@@ -16,13 +16,13 @@ Example:
     ros2 launch go2_nav realsense.launch.py
     
     # Then launch RTAB-Map SLAM (mapping mode):
-    ros2 launch go2_nav go2_rtabmap.launch.py use_sim_time:=false
-    
+    ros2 launch go2_nav go2_rtabmap.location.launch.py
+
     # Localization mode (using existing map):
-    ros2 launch go2_nav go2_rtabmap.launch.py use_sim_time:=false localization:=true
-    
+    ros2 launch go2_nav go2_rtabmap.location.launch.py localization:=true
+
     # With IMU filtering:
-    ros2 launch go2_nav go2_rtabmap.launch.py use_sim_time:=false filter_imu:=true
+    ros2 launch go2_nav go2_rtabmap.location.launch.py filter_imu:=true
 """
 
 import os
@@ -56,13 +56,12 @@ def get_workspace_root():
 def launch_setup(context, *args, **kwargs):
     
     localization = LaunchConfiguration('localization')
-    use_sim_time = LaunchConfiguration("use_sim_time")
+    use_sim_time = LaunchConfiguration('use_sim_time')
     use_imu_arg = LaunchConfiguration('use_imu')
-    
-    # Determine if IMU should be used
+
     # Default: disable IMU if use_sim_time is true, or if explicitly disabled
     use_imu_enabled = use_imu_arg.perform(context) == 'true'
-    use_imu_default = use_sim_time.perform(context) not in ["true", "True"]
+    use_imu_default = use_sim_time.perform(context) not in ['true', 'True']
     use_imu = use_imu_enabled if use_imu_arg.perform(context) in ['true', 'false'] else use_imu_default
     
     # Only wait for IMU initialization if IMU filter is enabled (which computes orientation)
@@ -241,11 +240,11 @@ def generate_launch_description():
     
     return LaunchDescription([
         DeclareLaunchArgument(
-            name='use_sim_time', 
+            name='use_sim_time',
             default_value='false',
-            description='Use simulation (Gazebo) clock if true'
+            choices=['true', 'false'],
+            description='Simulation / bag replay clock: true uses /clock. Default false (wall clock / robot).',
         ),
-
         DeclareLaunchArgument(
             name='filter_imu',
             default_value='false',
@@ -255,7 +254,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             name='use_imu',
             default_value='',
-            description='Enable/disable IMU usage. Empty = auto (disabled in sim, enabled otherwise). Set to "true" or "false" to override.'
+            description='Enable/disable IMU usage. Empty = auto (disabled when use_sim_time is true, enabled otherwise). Set to "true" or "false" to override.',
         ),
 
         DeclareLaunchArgument(
