@@ -2,27 +2,23 @@
 """
 Launch file for RTAB-Map SLAM for Go2 robot.
 
-This launch file starts RTAB-Map visual SLAM components including:
-- RGBD synchronization
-- Visual odometry
-- RTAB-Map SLAM or localization
-- Point cloud processing for obstacle detection
+This launch file runs RTAB-Map with **RGB-D + Livox** fusion by default:
 
-Note: RealSense camera must be launched separately:
+- ``rgbd_sync`` + ``rgbd_odometry`` on RealSense topics under ``/input/camera/...``
+- ``rtabmap`` subscribes to synchronized RGB-D **and** (optionally) Livox ``PointCloud2``
+
+Bring up sensors before this launch, e.g.::
+
     ros2 launch go2_nav realsense.launch.py
+    ros2 launch go2_nav livox_mid360.launch.py
 
 Example:
-    # First launch RealSense camera:
-    ros2 launch go2_nav realsense.launch.py
-    
-    # Then launch RTAB-Map SLAM (mapping mode):
     ros2 launch go2_nav go2_rtabmap.launch.py
 
-    # Localization mode (using existing map):
     ros2 launch go2_nav go2_rtabmap.launch.py localization:=true
 
-    # With IMU filtering:
-    ros2 launch go2_nav go2_rtabmap.launch.py filter_imu:=true
+    # Camera-only (disable Livox subscription on rtabmap):
+    ros2 launch go2_nav go2_rtabmap.launch.py enable_livox_cloud:=false
 """
 
 import os
@@ -70,7 +66,10 @@ def launch_setup(context, *args, **kwargs):
     # Raw IMU from Go2 may not have orientation, so don't wait for it
     filter_imu_enabled = LaunchConfiguration('filter_imu').perform(context) == 'true'
     wait_imu_to_init = use_imu and filter_imu_enabled
-    
+
+    scan_cloud_topic = LaunchConfiguration('scan_cloud_topic').perform(context)
+    enable_livox_cloud = LaunchConfiguration('enable_livox_cloud').perform(context) == 'true'
+
     # Database path for saving/loading maps
     # Only use database from PROJECT_ROOT_DIR/map, don't fall back to ~/.ros/rtabmap.db
     provided_db_path = LaunchConfiguration('database_path').perform(context)
@@ -98,92 +97,105 @@ def launch_setup(context, *args, **kwargs):
             print(f"[go2_rtabmap] No database found in map directory, will create new: {database_path}")
             print(f"  (Database will be saved to: {database_path})")
 
-    vslam_params = {
+    base_params = {
         'frame_id': 'base_link',
-        'guess_frame_id': 'vo',  # Use 'vo' since rgbd_odometry publishes to 'vo', not 'odom'
-        'Reg/Force3DoF': 'true',  # Constrain visual odometry to planar motion (z/roll/pitch fixed)
-        'approx_sync': False,
+        'guess_frame_id': 'vo',
+        'Reg/Force3DoF': 'true',
+        # vo, rgbd_image, and /livox/lidar use different sensor clocks; exact sync will stall.
+        'approx_sync': True,
+        'sync_queue_size': 30,
+        'topic_queue_size': 30,
         'use_sim_time': use_sim_time,
-        'subscribe_rgbd': True,
-        'subscribe_odom_info': True,
         'use_action_for_goal': True,
         'wait_imu_to_init': wait_imu_to_init,
         'wait_for_transform': 0.5,
         'database_path': database_path,
-        # RTAB-Map's parameters should be strings
         'Grid/DepthDecimation': '1',
-        'Grid/RangeMax': '3',
+        'Grid/RangeMax': '30',
         'GridGlobal/MinSize': '20',
         'Grid/MinClusterSize': '20',
         'Grid/MaxObstacleHeight': '2',
         'Odom/ResetCountdown': '2',
-        'Kp/RoiRatios': '0.0 0.0 0.0 0.4'  # ignore ground for loop closure detection
+        'Kp/RoiRatios': '0.0 0.0 0.0 0.4',
     }
-    
-    # IMU topic selection: use timestamp-fixed IMU (filtered if filter_imu is enabled)
+
+    sync_odom_params = {
+        **base_params,
+        'subscribe_rgbd': True,
+        'subscribe_odom_info': True,
+    }
+
+    rgbd_sync_params = {
+        **sync_odom_params,
+        # RealSense color vs aligned_depth stamps often differ by ~0.07–0.15s; default 0.01s warns.
+        'approx_sync_max_interval': 0.2,
+    }
+
+    rtab_params = {
+        **base_params,
+        'subscribe_rgbd': True,
+        'subscribe_scan_cloud': enable_livox_cloud,
+        'scan_cloud_is_2d': False,
+        'subscribe_odom_info': True,
+    }
+
     imu_topic = '/input/imu/filtered' if filter_imu_enabled else '/input/imu'
-    
-    vslam_remappings = [
-        ('odom', 'vo')
-    ]
-    
-    # Only add IMU remapping if IMU is enabled
+
+    odom_remappings = [('odom', 'vo')]
     if use_imu:
-        vslam_remappings.append(('imu', imu_topic))
-    
+        odom_remappings.append(('imu', imu_topic))
+
+    rtab_remappings = [('odom', 'vo')]
+    if enable_livox_cloud:
+        rtab_remappings.append(('scan_cloud', scan_cloud_topic))
+    if use_imu:
+        rtab_remappings.append(('imu', imu_topic))
+
     return [
-        # VSLAM nodes:
         Node(
             package='rtabmap_sync',
             executable='rgbd_sync',
             output='screen',
             prefix=rtab_prefix,
-            parameters=[vslam_params],
+            parameters=[rgbd_sync_params],
             remappings=[
                 ('rgb/image', '/input/camera/camera/color/image_raw'),
                 ('rgb/camera_info', '/input/camera/camera/color/camera_info'),
-                ('depth/image', '/input/camera/camera/aligned_depth_to_color/image_raw')
-            ]
+                ('depth/image', '/input/camera/camera/aligned_depth_to_color/image_raw'),
+            ],
         ),
-
         Node(
             package='rtabmap_odom',
             executable='rgbd_odometry',
             output='screen',
             prefix=rtab_prefix,
-            parameters=[vslam_params, {'odom_frame_id': 'vo'}],
-            remappings=vslam_remappings,
-            arguments=["--ros-args", "--log-level", 'info']
+            parameters=[sync_odom_params, {'odom_frame_id': 'vo'}],
+            remappings=odom_remappings,
+            arguments=['--ros-args', '--log-level', 'info'],
         ),
-
-        # SLAM Mode:
         Node(
             condition=UnlessCondition(localization),
             package='rtabmap_slam',
             executable='rtabmap',
             output='screen',
             prefix=rtab_prefix,
-            parameters=[vslam_params] + ([
-                {'Mem/InitWMWithAllNodes': 'True'}  # Load all nodes from existing database
+            parameters=[rtab_params] + ([
+                {'Mem/InitWMWithAllNodes': 'True'}
             ] if database_exists else []),
-            remappings=vslam_remappings,
-            arguments=[] if database_exists else ['-d']  # Don't delete if database exists
+            remappings=rtab_remappings,
+            arguments=[] if database_exists else ['-d'],
         ),
-            
-        # Localization mode:
         Node(
             condition=IfCondition(localization),
             package='rtabmap_slam',
             executable='rtabmap',
             output='screen',
             prefix=rtab_prefix,
-            parameters=[vslam_params, 
-                {
-                    'Mem/IncrementalMemory': 'False',
-                    'Mem/InitWMWithAllNodes': 'True'
-                }
-            ],
-            remappings=vslam_remappings
+            parameters=[rtab_params, {
+                'Mem/IncrementalMemory': 'False',
+                'Mem/InitWMWithAllNodes': 'True',
+            }],
+            remappings=rtab_remappings,
         ),
     ]
 
@@ -231,6 +243,17 @@ def generate_launch_description():
             default_value='0-4',
             description='CPU affinity for RTAB-Map nodes. Default 0-4 keeps RTAB stack within ~500% CPU total.'
         ),
-        
+        DeclareLaunchArgument(
+            'scan_cloud_topic',
+            default_value='/livox/lidar',
+            description='Livox PointCloud2 topic (remapped to rtabmap scan_cloud when enable_livox_cloud is true).',
+        ),
+        DeclareLaunchArgument(
+            'enable_livox_cloud',
+            default_value='true',
+            choices=['true', 'false'],
+            description='If true, rtabmap also subscribes to Livox scan_cloud (RGB-D VO stays rgbd_odometry).',
+        ),
+
         OpaqueFunction(function=launch_setup)
     ])

@@ -1,28 +1,12 @@
 #!/usr/bin/env python3
 """
-Launch file for RTAB-Map SLAM for Go2 robot.
+RTAB-Map **mapping** (fresh session): **RealSense RGB-D only** — no Livox subscription.
 
-This launch file starts RTAB-Map visual SLAM components including:
-- RGBD synchronization
-- Visual odometry
-- RTAB-Map SLAM or localization
-- Point cloud processing for obstacle detection
-
-Note: RealSense camera must be launched separately:
-    ros2 launch go2_nav realsense.launch.py
+For RGB-D + Livox fusion use ``go2_rtabmap.livox.mapping.launch.py`` instead.
 
 Example:
-    # First launch RealSense camera:
     ros2 launch go2_nav realsense.launch.py
-    
-    # Then launch RTAB-Map SLAM (mapping mode):
-    ros2 launch go2_nav go2_rtabmap.launch.py
-
-    # Localization mode (using existing map):
-    ros2 launch go2_nav go2_rtabmap.launch.py localization:=true
-
-    # With IMU filtering:
-    ros2 launch go2_nav go2_rtabmap.launch.py filter_imu:=true
+    ros2 launch go2_nav go2_rtabmap.mapping.launch.py
 """
 
 import os
@@ -34,13 +18,10 @@ from launch_ros.actions import Node
 
 def get_workspace_root():
     """Get workspace root directory by finding the directory containing 'src'."""
-    # Get the launch file's directory
     launch_file_path = os.path.abspath(__file__)
     current_dir = os.path.dirname(launch_file_path)
     
-    # Go up until we find a directory with 'src' subdirectory (workspace root)
-    # This works for both source and installed packages
-    max_levels = 10  # Safety limit to avoid infinite loops
+    max_levels = 10
     level = 0
     while level < max_levels and current_dir != os.path.dirname(current_dir):
         if os.path.exists(os.path.join(current_dir, 'src')):
@@ -48,8 +29,6 @@ def get_workspace_root():
         current_dir = os.path.dirname(current_dir)
         level += 1
     
-    # Fallback: go up 3 levels from launch file location
-    # (src/go2_nav/launch -> workspace root)
     launch_file_dir = os.path.dirname(launch_file_path)
     return os.path.dirname(os.path.dirname(os.path.dirname(launch_file_dir)))
 
@@ -61,138 +40,137 @@ def launch_setup(context, *args, **kwargs):
     rtab_cpu_affinity = LaunchConfiguration('rtab_cpu_affinity').perform(context)
     rtab_prefix = f'taskset -c {rtab_cpu_affinity}'
 
-    # Default: disable IMU if use_sim_time is true, or if explicitly disabled
     use_imu_enabled = use_imu_arg.perform(context) == 'true'
     use_imu_default = use_sim_time.perform(context) not in ['true', 'True']
     use_imu = use_imu_enabled if use_imu_arg.perform(context) in ['true', 'false'] else use_imu_default
     
-    # Only wait for IMU initialization if IMU filter is enabled (which computes orientation)
-    # Raw IMU from Go2 may not have orientation, so don't wait for it
     filter_imu_enabled = LaunchConfiguration('filter_imu').perform(context) == 'true'
     wait_imu_to_init = use_imu and filter_imu_enabled
-    
-    # Database path for saving/loading maps
-    # Only use database from PROJECT_ROOT_DIR/map, don't fall back to ~/.ros/rtabmap.db
+
     provided_db_path = LaunchConfiguration('database_path').perform(context)
     database_exists = False
     
     if provided_db_path:
-        # Use explicitly provided database path
         database_path = provided_db_path
         database_exists = os.path.exists(database_path)
         if database_exists:
-            print(f"[go2_rtabmap] Using provided RTAB-Map database: {database_path}")
+            print(f"[go2_rtabmap.mapping] Using provided RTAB-Map database: {database_path}")
         else:
-            print(f"[go2_rtabmap] Provided database path does not exist, will create new: {database_path}")
+            print(f"[go2_rtabmap.mapping] Provided database path does not exist, will create new: {database_path}")
     else:
-        # Mapping launch defaults to a fresh session:
-        # always start without preloading existing map DB.
         workspace_dir = get_workspace_root()
         map_db_path = os.path.join(workspace_dir, 'map', 'rtabmap.db')
         database_path = map_db_path
         database_exists = False
         if os.path.exists(map_db_path):
-            print(f"[go2_rtabmap] Existing DB detected but ignored for fresh mapping: {database_path}")
+            print(f"[go2_rtabmap.mapping] Existing DB detected but ignored for fresh mapping: {database_path}")
         else:
-            print(f"[go2_rtabmap] No database found in map directory, will create new: {database_path}")
+            print(f"[go2_rtabmap.mapping] No database found in map directory, will create new: {database_path}")
         print(f"  (Database will be saved to: {database_path})")
 
-    vslam_params = {
+    base_params = {
         'frame_id': 'base_link',
-        'guess_frame_id': 'vo',  # Use 'vo' since rgbd_odometry publishes to 'vo', not 'odom'
-        'Reg/Force3DoF': 'true',  # Constrain visual odometry to planar motion (z/roll/pitch fixed)
-        'approx_sync': False,
+        'guess_frame_id': 'vo',
+        'Reg/Force3DoF': 'true',
+        'approx_sync': True,
+        'sync_queue_size': 30,
+        'topic_queue_size': 30,
         'use_sim_time': use_sim_time,
-        'subscribe_rgbd': True,
-        'subscribe_odom_info': True,
         'use_action_for_goal': True,
         'wait_imu_to_init': wait_imu_to_init,
         'wait_for_transform': 0.5,
         'database_path': database_path,
-        # RTAB-Map's parameters should be strings
         'Grid/DepthDecimation': '1',
-        'Grid/RangeMax': '3',
+        'Grid/RangeMax': '5',
         'GridGlobal/MinSize': '20',
         'Grid/MinClusterSize': '20',
         'Grid/MaxObstacleHeight': '2',
         'Odom/ResetCountdown': '2',
-        'Kp/RoiRatios': '0.0 0.0 0.0 0.4'  # ignore ground for loop closure detection
+        'Kp/RoiRatios': '0.0 0.0 0.0 0.4',
     }
-    
-    # IMU topic selection: use timestamp-fixed IMU (filtered if filter_imu is enabled)
+
+    sync_odom_params = {
+        **base_params,
+        'subscribe_rgbd': True,
+        'subscribe_odom_info': True,
+    }
+
+    rgbd_sync_params = {
+        **sync_odom_params,
+        'approx_sync_max_interval': 0.2,
+    }
+
+    rtab_params = {
+        **base_params,
+        'subscribe_rgbd': True,
+        'subscribe_scan_cloud': False,
+        'subscribe_odom_info': True,
+    }
+
     imu_topic = '/input/imu/filtered' if filter_imu_enabled else '/input/imu'
-    
-    vslam_remappings = [
-        ('odom', 'vo')
-    ]
-    
-    # Only add IMU remapping if IMU is enabled
+
+    odom_remappings = [('odom', 'vo')]
     if use_imu:
-        vslam_remappings.append(('imu', imu_topic))
-    
+        odom_remappings.append(('imu', imu_topic))
+
+    rtab_remappings = [('odom', 'vo')]
+    if use_imu:
+        rtab_remappings.append(('imu', imu_topic))
+
     return [
-        # VSLAM nodes:
         Node(
             package='rtabmap_sync',
             executable='rgbd_sync',
             output='screen',
             prefix=rtab_prefix,
-            parameters=[vslam_params],
+            parameters=[rgbd_sync_params],
             remappings=[
                 ('rgb/image', '/input/camera/camera/color/image_raw'),
                 ('rgb/camera_info', '/input/camera/camera/color/camera_info'),
-                ('depth/image', '/input/camera/camera/aligned_depth_to_color/image_raw')
-            ]
+                ('depth/image', '/input/camera/camera/aligned_depth_to_color/image_raw'),
+            ],
         ),
-
         Node(
             package='rtabmap_odom',
             executable='rgbd_odometry',
             output='screen',
             prefix=rtab_prefix,
-            parameters=[vslam_params, {'odom_frame_id': 'vo'}],
-            remappings=vslam_remappings,
-            arguments=["--ros-args", "--log-level", 'info']
+            parameters=[sync_odom_params, {'odom_frame_id': 'vo'}],
+            remappings=odom_remappings,
+            arguments=['--ros-args', '--log-level', 'info'],
         ),
-
-        # SLAM Mode:
         Node(
             condition=UnlessCondition(localization),
             package='rtabmap_slam',
             executable='rtabmap',
             output='screen',
             prefix=rtab_prefix,
-            parameters=[vslam_params] + ([
-                {'Mem/InitWMWithAllNodes': 'True'}  # Load all nodes from existing database
+            parameters=[rtab_params] + ([
+                {'Mem/InitWMWithAllNodes': 'True'}
             ] if database_exists else []),
-            remappings=vslam_remappings,
-            arguments=[] if database_exists else ['-d']  # Don't delete if database exists
+            remappings=rtab_remappings,
+            arguments=[] if database_exists else ['-d'],
         ),
-            
-        # Localization mode:
         Node(
             condition=IfCondition(localization),
             package='rtabmap_slam',
             executable='rtabmap',
             output='screen',
             prefix=rtab_prefix,
-            parameters=[vslam_params, 
-                {
-                    'Mem/IncrementalMemory': 'False',
-                    'Mem/InitWMWithAllNodes': 'True'
-                }
-            ],
-            remappings=vslam_remappings
+            parameters=[rtab_params, {
+                'Mem/IncrementalMemory': 'False',
+                'Mem/InitWMWithAllNodes': 'True',
+            }],
+            remappings=rtab_remappings,
         ),
     ]
 
 def generate_launch_description():
-    # Set up log directory in project root (for tee redirection)
     workspace_dir = get_workspace_root()
     log_dir = os.path.join(workspace_dir, 'log')
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, 'go2_rtabmap.launch.log')
-    print(f"[go2_rtabmap] Use tee to capture logs: ros2 launch go2_nav go2_rtabmap.launch.py 2>&1 | tee -a {log_file}")
+    print(f"[go2_rtabmap.mapping] Logs: ros2 launch go2_nav go2_rtabmap.mapping.launch.py 2>&1 | tee -a {log_file}")
     
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -230,6 +208,6 @@ def generate_launch_description():
             default_value='0-4',
             description='CPU affinity for RTAB-Map nodes. Default 0-4 keeps RTAB stack within ~500% CPU total.'
         ),
-        
+
         OpaqueFunction(function=launch_setup)
     ])

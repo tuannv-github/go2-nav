@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """
-Launch file for RTAB-Map SLAM for Go2 robot.
+RTAB-Map **mapping** with RealSense RGB-D + Livox MID-360 ``PointCloud2`` fusion.
 
-RTAB-Map with RGB-D + Livox fusion plus ``location_publisher``.
+Odometry: when Livox scan_cloud is enabled (default), **ICP point-cloud odometry**
+(``icp_odometry`` — PCL / libpointmatcher ICP on ``scan_cloud``) publishes ``/vo``.
+With ``enable_livox_cloud:=false``, visual **RGB-D odometry** (``rgbd_odometry``) is used instead.
 
-Example:
+Prerequisites:
     ros2 launch go2_nav realsense.launch.py
     ros2 launch go2_nav livox_mid360.launch.py
-    ros2 launch go2_nav go2_rtabmap.location.launch.py
+
+Example:
+    ros2 launch go2_nav go2_rtabmap.livox.mapping.launch.py
+
+    ros2 launch go2_nav go2_rtabmap.livox.mapping.launch.py scan_cloud_topic:=/livox/lidar
+
+    # Turn off LiDAR input (RGB-D only, same as go2_rtabmap.mapping.launch.py):
+    ros2 launch go2_nav go2_rtabmap.livox.mapping.launch.py enable_livox_cloud:=false
 """
 
 import os
@@ -69,22 +78,21 @@ def launch_setup(context, *args, **kwargs):
         database_path = provided_db_path
         database_exists = os.path.exists(database_path)
         if database_exists:
-            print(f"[go2_rtabmap] Using provided RTAB-Map database: {database_path}")
+            print(f"[go2_rtabmap.livox.mapping] Using provided RTAB-Map database: {database_path}")
         else:
-            print(f"[go2_rtabmap] Provided database path does not exist, will create new: {database_path}")
+            print(f"[go2_rtabmap.livox.mapping] Provided database path does not exist, will create new: {database_path}")
     else:
-        # Only use database from project map directory
+        # Mapping launch defaults to a fresh session:
+        # always start without preloading existing map DB.
         workspace_dir = get_workspace_root()
         map_db_path = os.path.join(workspace_dir, 'map', 'rtabmap.db')
         database_path = map_db_path
-        
+        database_exists = False
         if os.path.exists(map_db_path):
-            database_exists = True
-            print(f"[go2_rtabmap] RTAB-Map database found in map directory: {database_path}")
+            print(f"[go2_rtabmap.livox.mapping] Existing DB detected but ignored for fresh mapping: {database_path}")
         else:
-            database_exists = False
-            print(f"[go2_rtabmap] No database found in map directory, will create new: {database_path}")
-            print(f"  (Database will be saved to: {database_path})")
+            print(f"[go2_rtabmap.livox.mapping] No database found in map directory, will create new: {database_path}")
+        print(f"  (Database will be saved to: {database_path})")
 
     base_params = {
         'frame_id': 'base_link',
@@ -99,7 +107,12 @@ def launch_setup(context, *args, **kwargs):
         'wait_for_transform': 0.5,
         'database_path': database_path,
         'Grid/DepthDecimation': '1',
-        'Grid/RangeMax': '30',
+        'Grid/RangeMax': '20',
+        # Clear ghosts faster: ray tracing marks free along rays; ProbMiss/ProbHit skew toward freeing.
+        'Grid/RayTracing': 'true',
+        'GridGlobal/ProbMiss': '0.46',
+        'GridGlobal/ProbHit': '0.63',
+        'GridGlobal/OccupancyThr': '0.45',
         'GridGlobal/MinSize': '20',
         'Grid/MinClusterSize': '20',
         'Grid/MaxObstacleHeight': '2',
@@ -111,6 +124,14 @@ def launch_setup(context, *args, **kwargs):
         **base_params,
         'subscribe_rgbd': True,
         'subscribe_odom_info': True,
+    }
+
+    # rgbd_odometry: visual odometry from synced RGB-D (used when Livox cloud is off).
+    # icp_odometry: scan_cloud ICP odometry (no RGB-D input); pairs with Livox PointCloud2.
+    icp_odom_params = {
+        **base_params,
+        'subscribe_odom_info': True,
+        'scan_cloud_is_2d': False,
     }
 
     rgbd_sync_params = {
@@ -132,6 +153,18 @@ def launch_setup(context, *args, **kwargs):
     if use_imu:
         odom_remappings.append(('imu', imu_topic))
 
+    icp_odom_remappings = [
+        ('odom', 'vo'),
+        # icp_odometry subscribes to both LaserScan `scan` and PointCloud2 `scan_cloud`;
+        # remap scan to a dummy name so only Livox clouds are used (see RTAB-Map icp_odometry docs).
+        ('scan', '/rtabmap/icp_odometry_unused_scan'),
+        ('scan_cloud', scan_cloud_topic),
+    ]
+    if use_imu:
+        icp_odom_remappings.append(('imu', imu_topic))
+
+    enable_livox_cloud_lc = LaunchConfiguration('enable_livox_cloud')
+
     rtab_remappings = [('odom', 'vo')]
     if enable_livox_cloud:
         rtab_remappings.append(('scan_cloud', scan_cloud_topic))
@@ -152,6 +185,17 @@ def launch_setup(context, *args, **kwargs):
             ],
         ),
         Node(
+            condition=IfCondition(enable_livox_cloud_lc),
+            package='rtabmap_odom',
+            executable='icp_odometry',
+            output='screen',
+            prefix=rtab_prefix,
+            parameters=[icp_odom_params, {'odom_frame_id': 'vo'}],
+            remappings=icp_odom_remappings,
+            arguments=['--ros-args', '--log-level', 'info'],
+        ),
+        Node(
+            condition=UnlessCondition(enable_livox_cloud_lc),
             package='rtabmap_odom',
             executable='rgbd_odometry',
             output='screen',
@@ -159,12 +203,6 @@ def launch_setup(context, *args, **kwargs):
             parameters=[sync_odom_params, {'odom_frame_id': 'vo'}],
             remappings=odom_remappings,
             arguments=['--ros-args', '--log-level', 'info'],
-        ),
-        Node(
-            package='location_publisher',
-            executable='location_publisher',
-            name='location_publisher',
-            output='screen',
         ),
         Node(
             condition=UnlessCondition(localization),
@@ -198,7 +236,7 @@ def generate_launch_description():
     log_dir = os.path.join(workspace_dir, 'log')
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, 'go2_rtabmap.launch.log')
-    print(f"[go2_rtabmap] Use tee to capture logs: ros2 launch go2_nav go2_rtabmap.launch.py 2>&1 | tee -a {log_file}")
+    print(f"[go2_rtabmap.livox.mapping] Logs: ros2 launch go2_nav go2_rtabmap.livox.mapping.launch.py 2>&1 | tee -a {log_file}")
     
     return LaunchDescription([
         DeclareLaunchArgument(

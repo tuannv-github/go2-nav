@@ -10,11 +10,11 @@ This directory contains launch entry points for camera bringup, RTAB-Map SLAM/lo
   - `base_link -> utlidar_imu` (identity)
 
 - `go2_rtabmap.mapping.launch.py`  
-  RTAB-Map mapping-focused launch. Includes:
-  - IMU timestamp fixer
-  - Optional `imu_filter_madgwick`
-  - `rgbd_sync`, `rgbd_odometry`, `rtabmap`
-  
+  RTAB-Map **fresh mapping**, RealSense **RGB-D only** (no Livox).
+
+- `go2_rtabmap.livox.mapping.launch.py`  
+  Same mapping flow plus Livox `PointCloud2` fused into `rtabmap` (requires RealSense + Livox running).
+
   Main behavior: defaults to **fresh mapping** (does not preload existing default DB unless explicitly provided via `database_path`).
 
 - `go2_rtabmap.launch.py`  
@@ -42,7 +42,8 @@ This directory contains launch entry points for camera bringup, RTAB-Map SLAM/lo
   - RTAB-Map launches no longer publish those static transforms.
 
 - Mapping behavior:
-  - `go2_rtabmap.mapping.launch.py`: fresh mapping by default.
+  - `go2_rtabmap.mapping.launch.py`: fresh mapping, camera-only.
+  - `go2_rtabmap.livox.mapping.launch.py`: fresh mapping with Livox + camera fusion.
   - `go2_rtabmap.launch.py`: generic flow; can continue from existing DB by default.
 
 - Extra location output:
@@ -56,10 +57,15 @@ This directory contains launch entry points for camera bringup, RTAB-Map SLAM/lo
 
 ## Recommended Startup Sequences
 
-- Fresh mapping:
+- Fresh mapping (camera only):
   1. `ros2 launch go2_nav realsense.launch.py`
   2. `ros2 launch go2_nav go2_rtabmap.mapping.launch.py`
-  3. Optional: `ros2 launch go2_nav go2_rviz.launch.py`
+
+- Fresh mapping (camera + Livox):
+  1. `ros2 launch go2_nav realsense.launch.py`
+  2. `ros2 launch go2_nav livox_mid360.launch.py`
+  3. `ros2 launch go2_nav go2_rtabmap.livox.mapping.launch.py`
+  4. Optional: `ros2 launch go2_nav go2_rviz.launch.py`
 
 - Localization with existing map DB:
   1. `ros2 launch go2_nav realsense.launch.py`
