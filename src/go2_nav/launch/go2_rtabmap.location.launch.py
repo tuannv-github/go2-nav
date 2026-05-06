@@ -129,15 +129,6 @@ def launch_setup(context, *args, **kwargs):
         vslam_remappings.append(('imu', imu_topic))
     
     return [
-        # Static transform from base_link to IMU frame
-        # Transform: x y z qx qy qz qw (0 0 0 0 0 0 1 = identity transform)
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_link_to_utlidar_imu',
-            arguments=['0', '0', '0', '0', '0', '0', '1', 'base_link', 'utlidar_imu']
-        ),
-        
         # IMU timestamp fixer - republishes IMU with fresh timestamps
         # This fixes issues where IMU timestamps are stale or incorrect
         # Always enabled to ensure proper timestamp synchronization

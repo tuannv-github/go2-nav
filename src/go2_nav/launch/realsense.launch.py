@@ -106,7 +106,7 @@ def generate_launch_description():
     )
     declare_camera_pitch = DeclareLaunchArgument(
         'camera_pitch',
-        default_value='-22.0',
+        default_value='0.0',
         description='Pitch angle of camera in degrees'
     )
     declare_camera_yaw = DeclareLaunchArgument(
@@ -114,7 +114,7 @@ def generate_launch_description():
         default_value='0.0',
         description='Yaw angle of camera in degrees'
     )
-
+    
     return LaunchDescription([
         # Launch arguments
         declare_camera_name,
@@ -150,6 +150,14 @@ def launch_setup(context, *args, **kwargs):
     enable_sync = LaunchConfiguration('enable_sync')
     pointcloud = LaunchConfiguration('pointcloud')
     
+    # Get camera transform parameters
+    camera_x = LaunchConfiguration('camera_x').perform(context)
+    camera_y = LaunchConfiguration('camera_y').perform(context)
+    camera_z = LaunchConfiguration('camera_z').perform(context)
+    camera_roll = LaunchConfiguration('camera_roll').perform(context)
+    camera_pitch = LaunchConfiguration('camera_pitch').perform(context)
+    camera_yaw = LaunchConfiguration('camera_yaw').perform(context)
+    
     # Launch arguments dictionary
     launch_args = {
         'camera_name': camera_name,
@@ -163,22 +171,14 @@ def launch_setup(context, *args, **kwargs):
         'pointcloud.enable': pointcloud,
         'serial_no': serial_no,
     }
-    
-    # Get camera transform parameters
-    camera_x = LaunchConfiguration('camera_x').perform(context)
-    camera_y = LaunchConfiguration('camera_y').perform(context)
-    camera_z = LaunchConfiguration('camera_z').perform(context)
-    camera_roll = LaunchConfiguration('camera_roll').perform(context)
-    camera_pitch = LaunchConfiguration('camera_pitch').perform(context)
-    camera_yaw = LaunchConfiguration('camera_yaw').perform(context)
-    
+
     # Convert Euler angles (in degrees) to quaternion
     import math
     try:
         roll = float(camera_roll) * math.pi / 180.0
         pitch = float(camera_pitch) * math.pi / 180.0
         yaw = float(camera_yaw) * math.pi / 180.0
-        
+
         # Convert Euler to quaternion (ZYX convention)
         cy = math.cos(yaw * 0.5)
         sy = math.sin(yaw * 0.5)
@@ -186,7 +186,7 @@ def launch_setup(context, *args, **kwargs):
         sp = math.sin(pitch * 0.5)
         cr = math.cos(roll * 0.5)
         sr = math.sin(roll * 0.5)
-        
+
         qw = cr * cp * cy + sr * sp * sy
         qx = sr * cp * cy - cr * sp * sy
         qy = cr * sp * cy + sr * cp * sy
@@ -198,18 +198,23 @@ def launch_setup(context, *args, **kwargs):
     return [
         # Enable IR emitter for better depth quality
         SetParameter(name='depth_module.emitter_enabled', value=1),
-        
+
         # Static transform from base_link to camera_link
-        # This connects the robot base to the camera frame
-        # Adjust x, y, z, roll, pitch, yaw based on your camera mounting
-        # Default: -0.15m forward (0.15m backward), 0.1m up, no rotation (adjust as needed)
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_camera_link',
-            arguments=[str(camera_x), str(camera_y), str(camera_z), 
-                      str(qx), str(qy), str(qz), str(qw), 
-                      'base_link', 'camera_link']
+            arguments=[str(camera_x), str(camera_y), str(camera_z),
+                       str(qx), str(qy), str(qz), str(qw),
+                       'base_link', 'camera_link']
+        ),
+
+        # Static transform from base_link to IMU frame
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_utlidar_imu',
+            arguments=['0', '0', '0', '0', '0', '0', '1', 'base_link', 'utlidar_imu']
         ),
         
         # Launch RealSense camera driver under /input/camera namespace
