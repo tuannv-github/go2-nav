@@ -123,11 +123,16 @@ class JoystickReader:
     
     def __init__(self, device_path, device_name, state_queue, running, button_mapping, log_file,
                  max_x_speed=1.0, max_y_speed=1.0, max_yaw_speed=1.0,
-                 device_config_key=None, reconnect_auto_detect=True, reconnect_delay=1.0):
+                 device_config_key=None, reconnect_auto_detect=True, reconnect_delay=1.0,
+                 control_heartbeat_interval=0.5, transmit_armed_default=False):
         self.state_queue = state_queue
         self.running = running
         self.button_mapping = button_mapping
         self.log_file = log_file
+        self.control_heartbeat_interval = control_heartbeat_interval
+        self._last_state_queued_monotonic = 0.0
+        self._transmit_armed_default = transmit_armed_default
+        self._transmit_enabled = transmit_armed_default
         self.max_x_speed = max_x_speed
         self.max_y_speed = max_y_speed
         self.max_yaw_speed = max_yaw_speed
@@ -183,7 +188,7 @@ class JoystickReader:
 
         self.controller_state = {
             'lx': 0.0, 'ly': 0.0, 'rx': 0.0, 'ry': 0.0, 'btn_a': 0, 'btn_b': 0,
-            'btn_x': 0, 'btn_y': 0, 'l1': 0, 'r1': 0, 'l2': 0
+            'btn_x': 0, 'btn_y': 0, 'l1': 0, 'r1': 0, 'l2': 0, 'start': 0,
         }
         self.buttons_raw.clear()
 
@@ -199,6 +204,9 @@ class JoystickReader:
                 key_t = (ecodes.EV_KEY, code)
                 if key_t not in self.event_map:
                     self.event_map[key_t] = ('key', bit_pos)
+
+        # START: arm/disarm MQTT transmit on press edge (overrides BTN_* bitfield tuple)
+        self.event_map[(ecodes.EV_KEY, ecodes.BTN_START)] = 'start'
 
     def _resolve_device_path(self):
         """Return (path, evdev_name) for opening, or (None, None) if not available."""
@@ -221,12 +229,37 @@ class JoystickReader:
         self.controller_state.update({
             'lx': 0.0, 'ly': 0.0, 'rx': 0.0, 'ry': 0.0,
             'btn_a': 0, 'btn_b': 0, 'btn_x': 0, 'btn_y': 0, 'l1': 0, 'r1': 0, 'l2': 0,
+            'start': 0,
         })
         self.buttons_raw.clear()
         try:
             self.update_wireless_controller_state()
         except Exception as e:
             self.logger.warning("JoystickReader: Could not publish neutral state: %s", e)
+
+    def _publish_if_transmit_enabled(self):
+        """Queue MQTT state only while transmit is armed (START toggles)."""
+        if self._transmit_enabled:
+            self.update_wireless_controller_state()
+
+    def _on_start_button_event(self, value):
+        """Edge on press: toggle transmit on/off; stop sends one neutral snapshot."""
+        prev = self.controller_state.get('start', 0)
+        self.controller_state['start'] = value
+        if prev == 0 and value == 1:
+            self._transmit_enabled = not self._transmit_enabled
+            if self._transmit_enabled:
+                self.logger.warning("Wanring -------- start sending")
+                self.logger.info("JoystickReader: MQTT transmit enabled (START)")
+                self.update_wireless_controller_state()
+            else:
+                self.logger.warning("Wanring -------- stop sending")
+                self.logger.info("JoystickReader: MQTT transmit disabled (START); neutral")
+                self._reset_and_publish_neutral()
+            return True
+        if self._transmit_enabled:
+            self.update_wireless_controller_state()
+        return True
 
     def normalize_axis(self, value):
         """Normalize axis value to range [-1.0, 1.0] using configured ranges"""
@@ -307,17 +340,22 @@ class JoystickReader:
         state['keys'] = keys & 0xFFFF  # Ensure uint16
         
         # Put state in queue (non-blocking, drop if queue is full to keep latest)
+        queued = False
         try:
             self.state_queue.put_nowait(state)
             self.logger.debug(f"JoystickReader: Put state in queue: {state}")
+            queued = True
         except Exception as e:
             # Queue is full, try to get one and put new one
             try:
                 self.state_queue.get_nowait()
                 self.state_queue.put_nowait(state)
                 self.logger.debug(f"JoystickReader: Queue was full, dropped old state, put new: {state}")
+                queued = True
             except Exception as e2:
                 self.logger.warning(f"JoystickReader: Failed to put state in queue: {e2}")
+        if queued:
+            self._last_state_queued_monotonic = time.monotonic()
     
     def process_event(self, event):
         """Process joystick event and update state using role-based event_map"""
@@ -338,7 +376,7 @@ class JoystickReader:
                     normalized_value = self.normalize_axis(event.value)
                     self.controller_state[mapping] = normalized_value
 
-                self.update_wireless_controller_state()
+                self._publish_if_transmit_enabled()
                 return True
 
             if isinstance(mapping, tuple) and mapping[0] == 'key':
@@ -354,14 +392,17 @@ class JoystickReader:
                     button_name = f"BTN_{event.code}"
                     
                 self.buttons_raw[button_name] = event.value
-                self.update_wireless_controller_state()
+                self._publish_if_transmit_enabled()
                 return True
                 
+            if isinstance(mapping, str) and mapping == 'start':
+                return self._on_start_button_event(event.value)
+
             if isinstance(mapping, str) and (
-                mapping.startswith('btn_') or mapping in ['l1', 'r1', 'l2', 'select', 'start', 'mode', 'l3', 'r3']
+                mapping.startswith('btn_') or mapping in ['l1', 'r1', 'l2', 'select', 'mode', 'l3', 'r3']
             ):
                 self.controller_state[mapping] = event.value
-                self.update_wireless_controller_state()
+                self._publish_if_transmit_enabled()
                 return True
         
         elif event.type == ecodes.EV_SYN:
@@ -395,6 +436,11 @@ class JoystickReader:
                 self.device_name,
                 self.device_path,
             )
+            self._transmit_enabled = self._transmit_armed_default
+            self.logger.info(
+                "JoystickReader: MQTT transmit %s at session start (press START to toggle)",
+                "enabled" if self._transmit_enabled else "disabled until START",
+            )
 
             device = None
             session_ok = False
@@ -426,6 +472,13 @@ class JoystickReader:
                                     break
                                 self.process_event(event)
                         else:
+                            now = time.monotonic()
+                            if (
+                                self.control_heartbeat_interval > 0
+                                and now - self._last_state_queued_monotonic
+                                >= self.control_heartbeat_interval
+                            ):
+                                self._publish_if_transmit_enabled()
                             iteration += 1
                             if iteration % 50 == 0:
                                 self.logger.debug(
@@ -595,7 +648,8 @@ class JoystickMQTT:
     def __init__(self, device_path, mqtt_broker, mqtt_port, mqtt_topic, 
                  mqtt_username=None, mqtt_password=None, log_file=None,
                  max_x_speed=1.0, max_y_speed=1.0, max_yaw_speed=1.0,
-                 device_config_key=None, reconnect_auto_detect=True, reconnect_delay=1.0):
+                 device_config_key=None, reconnect_auto_detect=True, reconnect_delay=1.0,
+                 control_heartbeat_interval=0.5, transmit_armed_default=False):
         self.device_path = device_path
         self.mqtt_broker = mqtt_broker
         self.mqtt_port = mqtt_port
@@ -608,6 +662,8 @@ class JoystickMQTT:
         self.device_config_key = device_config_key
         self.reconnect_auto_detect = reconnect_auto_detect
         self.reconnect_delay = reconnect_delay
+        self.control_heartbeat_interval = control_heartbeat_interval
+        self.transmit_armed_default = transmit_armed_default
         
         # Setup logging
         if log_file is None:
@@ -687,6 +743,8 @@ class JoystickMQTT:
             device_config_key=self.device_config_key,
             reconnect_auto_detect=self.reconnect_auto_detect,
             reconnect_delay=self.reconnect_delay,
+            control_heartbeat_interval=self.control_heartbeat_interval,
+            transmit_armed_default=self.transmit_armed_default,
         )
         
         publisher = MQTTPublisher(
@@ -752,6 +810,19 @@ def main():
                        help='MQTT password (optional)')
     parser.add_argument('--interval', '-i', type=float, default=0.1,
                        help='Publish interval in seconds (default: 0.1)')
+    parser.add_argument(
+        '--control-heartbeat',
+        type=float,
+        default=0.5,
+        metavar='SEC',
+        help='Re-send current control state at least this often when there are no joystick '
+             'events (default: 0.5). Set to 0 to disable.',
+    )
+    parser.add_argument(
+        '--transmit-on-start',
+        action='store_true',
+        help='Begin with MQTT transmit enabled (default: off until START is pressed once)',
+    )
     parser.add_argument('--log-file', '-l', type=str, default=None,
                        help='Log file path (default: joystick_mqtt.py.log)')
     parser.add_argument('--max-x-speed', type=float, default=0.5,
@@ -845,6 +916,8 @@ def main():
             device_config_key=device_config_key,
             reconnect_auto_detect=reconnect_auto_detect,
             reconnect_delay=args.reconnect_delay,
+            control_heartbeat_interval=args.control_heartbeat,
+            transmit_armed_default=args.transmit_on_start,
         )
         joystick_mqtt.run(publish_interval=args.interval)
     except Exception as e:
