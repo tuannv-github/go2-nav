@@ -25,28 +25,69 @@ if not os.path.exists(list_devices_path):
 
 # Add the directory to path to import the module
 sys.path.insert(0, script_dir)
-from list_joystick_devices import find_joystick_device_path
+from list_joystick_devices import find_joystick_device_path, verify_joystick_device_path
 
 
-# Device configurations mapping patterns in device names to specific settings
+def _role_bindings(raw):
+    """Single (etype, ecode) or list of alternates → iterable for event_map."""
+    if raw is None:
+        return
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, tuple) and len(item) == 2:
+                yield item
+        return
+    if isinstance(raw, tuple) and len(raw) == 2:
+        yield raw
+
+
+# Logitech Dual Action KEY codes; some EasySMX / USB gamepads report the same.
+_LD2_KEY = {"a": 289, "l2": 294}
+
+
+# EasySMX layout (signed 16-bit sticks on ABS_X/Y + ABS_RX/RY). Often enumerates as
+# "Microsoft X-Box 360 pad". L2 may be BTN_TL2, Dual-Action code 294, or ABS_Z (analog LT);
+# those must all drive `l2` so L2+A can produce keys==288 like Logitech.
+_EASYSMX_CONFIG = {
+    "lx": (ecodes.EV_ABS, ecodes.ABS_X),
+    "ly": (ecodes.EV_ABS, ecodes.ABS_Y),
+    "rx": (ecodes.EV_ABS, ecodes.ABS_RX),
+    "ry": (ecodes.EV_ABS, ecodes.ABS_RY),
+    "l1": (ecodes.EV_KEY, ecodes.BTN_TL),
+    "r1": (ecodes.EV_KEY, ecodes.BTN_TR),
+    "l2": [
+        (ecodes.EV_KEY, ecodes.BTN_TL2),
+        (ecodes.EV_KEY, _LD2_KEY["l2"]),
+        (ecodes.EV_ABS, ecodes.ABS_Z),
+    ],
+    "btn_a": [
+        (ecodes.EV_KEY, ecodes.BTN_SOUTH),
+        (ecodes.EV_KEY, _LD2_KEY["a"]),
+    ],
+    "btn_b": (ecodes.EV_KEY, ecodes.BTN_EAST),
+    "btn_x": (ecodes.EV_KEY, ecodes.BTN_NORTH),
+    "btn_y": (ecodes.EV_KEY, ecodes.BTN_WEST),
+    "axis_min": -32768,
+    "axis_max": 32767,
+}
+
+# Device configurations: patterns matched as substrings of evdev device name (except DEFAULT).
 DEVICE_CONFIGS = {
-    "EasySMX": {
-        "lx": (ecodes.EV_ABS, ecodes.ABS_X),
-        "ly": (ecodes.EV_ABS, ecodes.ABS_Y),
-        "rx": (ecodes.EV_ABS, ecodes.ABS_RX),
-        "ry": (ecodes.EV_ABS, ecodes.ABS_RY),
-        "l2": (ecodes.EV_KEY, ecodes.BTN_TL2),
-        "btn_a": (ecodes.EV_KEY, ecodes.BTN_SOUTH),
-        "axis_min": -32768,
-        "axis_max": 32767,
-    },
+    "EasySMX": _EASYSMX_CONFIG,
+    "X-Box 360": _EASYSMX_CONFIG,
     "Logitech": {
         "lx": (ecodes.EV_ABS, ecodes.ABS_X),
         "ly": (ecodes.EV_ABS, ecodes.ABS_Y),
         "rx": (ecodes.EV_ABS, ecodes.ABS_Z),
         "ry": (ecodes.EV_ABS, ecodes.ABS_RZ),
-        "l2": (ecodes.EV_KEY, 294),
-        "btn_a": (ecodes.EV_KEY, 289),
+        "l2": [
+            (ecodes.EV_KEY, 294),
+            (ecodes.EV_KEY, ecodes.BTN_TL2),
+        ],
+        "btn_a": [
+            (ecodes.EV_KEY, 289),
+            (ecodes.EV_KEY, ecodes.BTN_SOUTH),
+        ],
         "btn_b": (ecodes.EV_KEY, 290),
         "btn_x": (ecodes.EV_KEY, 288),
         "btn_y": (ecodes.EV_KEY, 291),
@@ -67,14 +108,22 @@ DEVICE_CONFIGS = {
     }
 }
 
+# CLI --device-config values -> canonical DEVICE_CONFIGS key (None = infer from device name)
+DEVICE_CONFIG_CLI = {
+    "auto": None,
+    "easysmx": "EasySMX",
+    "xbox360": "X-Box 360",
+    "logitech": "Logitech",
+    "default": "DEFAULT",
+}
+
 
 class JoystickReader:
     """Class to read joystick events and send state to queue"""
     
     def __init__(self, device_path, device_name, state_queue, running, button_mapping, log_file,
-                 max_x_speed=1.0, max_y_speed=1.0, max_yaw_speed=1.0):
-        self.device_path = device_path
-        self.device_name = device_name
+                 max_x_speed=1.0, max_y_speed=1.0, max_yaw_speed=1.0,
+                 device_config_key=None, reconnect_auto_detect=True, reconnect_delay=1.0):
         self.state_queue = state_queue
         self.running = running
         self.button_mapping = button_mapping
@@ -82,15 +131,16 @@ class JoystickReader:
         self.max_x_speed = max_x_speed
         self.max_y_speed = max_y_speed
         self.max_yaw_speed = max_yaw_speed
-        
+        self.device_config_key = device_config_key
+        self.reconnect_auto_detect = reconnect_auto_detect
+        self.reconnect_delay = reconnect_delay
+        self._fixed_device_path = device_path
+
         # Internal state
         self.axes_raw = {}
         self.axes_raw_values = {}
         self.buttons_raw = {}
         
-        # Configure mapping and normalization based on device name
-        config = DEVICE_CONFIGS["DEFAULT"]  # Start with default
-
         # Setup logging
         logging.basicConfig(
             level=logging.DEBUG,
@@ -101,39 +151,82 @@ class JoystickReader:
             ]
         )
         self.logger = logging.getLogger(__name__)
-       
-        # Configure mapping and normalization based on device name
-        self.config = DEVICE_CONFIGS["DEFAULT"]  # Start with default
-        
-        for pattern, device_config in DEVICE_CONFIGS.items():
-            if pattern != "DEFAULT" and pattern in self.device_name:
-                self.config = device_config
-                self.logger.info(f"JoystickReader: Applied {pattern} configuration")
-                break
-        
+
+        self._configure_for_device(device_path, device_name)
+
+    def _configure_for_device(self, device_path, device_name):
+        """Apply device path/name and rebuild axis map and evdev bindings."""
+        self.device_path = device_path
+        self.device_name = device_name
+
+        if self.device_config_key is not None and self.device_config_key in DEVICE_CONFIGS:
+            self.config = DEVICE_CONFIGS[self.device_config_key]
+            self.logger.info(
+                "JoystickReader: Using forced %s axis/button mapping", self.device_config_key
+            )
+        else:
+            self.config = DEVICE_CONFIGS["DEFAULT"]
+            matched = False
+            for pattern, device_config in DEVICE_CONFIGS.items():
+                if pattern != "DEFAULT" and pattern in self.device_name:
+                    self.config = device_config
+                    self.logger.info(
+                        "JoystickReader: Applied %s mapping (matched device name)", pattern
+                    )
+                    matched = True
+                    break
+            if not matched:
+                self.logger.info("JoystickReader: Using DEFAULT mapping for %s", self.device_name)
+
         self.axis_min = self.config["axis_min"]
         self.axis_max = self.config["axis_max"]
-        
-        # Current normalized state of axes and special buttons
+
         self.controller_state = {
             'lx': 0.0, 'ly': 0.0, 'rx': 0.0, 'ry': 0.0, 'btn_a': 0, 'btn_b': 0,
             'btn_x': 0, 'btn_y': 0, 'l1': 0, 'r1': 0, 'l2': 0
         }
-        
-        # Build event_map from config roles
+        self.buttons_raw.clear()
+
         self.event_map = {}
-        # Support a wide range of roles
         roles = ['lx', 'ly', 'rx', 'ry', 'btn_a', 'btn_b', 'btn_x', 'btn_y', 'l1', 'r1', 'l2']
         for role in roles:
-            etype, ecode = self.config.get(role, (None, None))
-            if etype is not None and ecode is not None:
+            for etype, ecode in _role_bindings(self.config.get(role)):
                 self.event_map[(etype, ecode)] = role
-        
-        # Build button part of event_map from button_mapping
+
         for btn_name, bit_pos in self.button_mapping.items():
             if hasattr(ecodes, btn_name):
                 code = getattr(ecodes, btn_name)
-                self.event_map[(ecodes.EV_KEY, code)] = ('key', bit_pos)
+                key_t = (ecodes.EV_KEY, code)
+                if key_t not in self.event_map:
+                    self.event_map[key_t] = ('key', bit_pos)
+
+    def _resolve_device_path(self):
+        """Return (path, evdev_name) for opening, or (None, None) if not available."""
+        if self.reconnect_auto_detect:
+            path = find_joystick_device_path()
+        else:
+            path = self._fixed_device_path
+            if path and not os.path.exists(path):
+                path = None
+        if not path:
+            return None, None
+        ok, detail = verify_joystick_device_path(path)
+        if not ok:
+            self.logger.warning("JoystickReader: %s", detail)
+            return None, None
+        return path, detail
+
+    def _reset_and_publish_neutral(self):
+        """Zero sticks/buttons and queue neutral payload after disconnect."""
+        self.controller_state.update({
+            'lx': 0.0, 'ly': 0.0, 'rx': 0.0, 'ry': 0.0,
+            'btn_a': 0, 'btn_b': 0, 'btn_x': 0, 'btn_y': 0, 'l1': 0, 'r1': 0, 'l2': 0,
+        })
+        self.buttons_raw.clear()
+        try:
+            self.update_wireless_controller_state()
+        except Exception as e:
+            self.logger.warning("JoystickReader: Could not publish neutral state: %s", e)
 
     def normalize_axis(self, value):
         """Normalize axis value to range [-1.0, 1.0] using configured ranges"""
@@ -157,6 +250,8 @@ class JoystickReader:
             'ly': round(-self.controller_state.get('ly', 0.0) * self.max_x_speed, 3), # Forward/Backward
             'rx': round(self.controller_state.get('rx', 0.0) * self.max_yaw_speed, 3), # Yaw
             'ry': round(-self.controller_state.get('ry', 0.0), 3),  # Invert Y axis
+            'device_name': self.device_name,
+            'device_path': self.device_path,
         }
         
         # Encode buttons as uint16 bitfield
@@ -185,8 +280,7 @@ class JoystickReader:
             if bit_position is not None and pressed:
                 keys |= (1 << bit_position)
         
-        # Special Unitree-style key logic:
-        # Use the mapped A button state
+        # Unitree / Easy-style combo: L2+A → 288, L2 alone → 32, A alone (no other btns) → 4
         a_button_pressed = self.controller_state['btn_a']
         l2_pressed = self.controller_state['l2']
         
@@ -235,20 +329,19 @@ class JoystickReader:
         if mapping:
             if event.type == ecodes.EV_ABS:
                 self.logger.debug(f"Axis event: role={mapping}, code={event.code}, value={event.value}")
-                
-                # Update normalized value in controller_state
-                normalized_value = self.normalize_axis(event.value)
-                self.controller_state[mapping] = normalized_value
-                
+
+                if mapping == 'l2':
+                    # Analog left trigger (typical Xbox / EasySMX on ABS_Z, 0–255)
+                    v = max(0, int(event.value))
+                    self.controller_state['l2'] = 1 if v > 48 else 0
+                else:
+                    normalized_value = self.normalize_axis(event.value)
+                    self.controller_state[mapping] = normalized_value
+
                 self.update_wireless_controller_state()
                 return True
-                
-            elif mapping.startswith('btn_') or mapping in ['l1', 'r1', 'l2', 'select', 'start', 'mode', 'l3', 'r3']:
-                self.controller_state[mapping] = event.value
-                self.update_wireless_controller_state()
-                return True
-                
-            elif isinstance(mapping, tuple) and mapping[0] == 'key':
+
+            if isinstance(mapping, tuple) and mapping[0] == 'key':
                 bit_pos = mapping[1]
                 # Find the button name from ecodes if possible
                 button_name = None
@@ -263,6 +356,13 @@ class JoystickReader:
                 self.buttons_raw[button_name] = event.value
                 self.update_wireless_controller_state()
                 return True
+                
+            if isinstance(mapping, str) and (
+                mapping.startswith('btn_') or mapping in ['l1', 'r1', 'l2', 'select', 'start', 'mode', 'l3', 'r3']
+            ):
+                self.controller_state[mapping] = event.value
+                self.update_wireless_controller_state()
+                return True
         
         elif event.type == ecodes.EV_SYN:
             return False
@@ -270,84 +370,111 @@ class JoystickReader:
         return False
     
     def run(self):
-        """Main loop to read joystick events"""
-        self.logger.info("JoystickReader: Started, waiting for events...")
-        
-        device = None
-        try:
-            # Open device
-            device = InputDevice(self.device_path)
-            self.logger.info(f"JoystickReader: Opened joystick device: {device.name}")
-            self.logger.info(f"JoystickReader: Device capabilities: {list(device.capabilities().keys())}")
-            
-            # Try to grab device exclusively to prevent other processes from reading it
-            # Note: Some devices may not support grabbing, or it might prevent events
+        """Reconnect loop: find device (scan or fixed path), read until disconnect, repeat."""
+        mode = "auto-detect" if self.reconnect_auto_detect else f"fixed {self._fixed_device_path}"
+        self.logger.info(
+            "JoystickReader: Started (%s; %.1fs between reconnect tries)",
+            mode,
+            self.reconnect_delay,
+        )
+
+        while self.running.value:
+            path, name = self._resolve_device_path()
+            if not path:
+                self.logger.warning(
+                    "JoystickReader: No gamepad (%s); retry in %.1fs",
+                    mode,
+                    self.reconnect_delay,
+                )
+                time.sleep(self.reconnect_delay)
+                continue
+
+            self._configure_for_device(path, name)
+            self.logger.info(
+                "JoystickReader: Using %s at %s",
+                self.device_name,
+                self.device_path,
+            )
+
+            device = None
+            session_ok = False
             try:
-                device.grab()
-                self.logger.info("JoystickReader: Grabbed device exclusively")
-            except Exception as grab_error:
-                self.logger.warning(f"JoystickReader: Could not grab device (may already be in use): {grab_error}")
-                self.logger.info("JoystickReader: Continuing without grab...")
-            
-            # Send initial state (all zeros) to queue
-            initial_state = {'lx': 0.0, 'ly': 0.0, 'rx': 0.0, 'ry': 0.0, 'keys': 0}
-            try:
-                self.state_queue.put_nowait(initial_state)
-                self.logger.debug("JoystickReader: Sent initial state to queue")
-            except:
-                pass
-            
-            # Log that we're entering the read loop
-            self.logger.info("JoystickReader: Entering read loop, waiting for events...")
-            
-            # Use select-based reading to avoid blocking issues
-            
-            iteration = 0
-            while self.running.value:
+                device = InputDevice(path)
+                self.logger.info(
+                    "JoystickReader: Capabilities: %s",
+                    list(device.capabilities().keys()),
+                )
                 try:
-                    # Check if device is still valid
-                    if not device.fd:
-                        self.logger.error("JoystickReader: Device file descriptor is invalid")
+                    device.grab()
+                    self.logger.info("JoystickReader: Grabbed device exclusively")
+                except Exception as grab_error:
+                    self.logger.warning(
+                        "JoystickReader: Could not grab device: %s", grab_error
+                    )
+                    self.logger.info("JoystickReader: Continuing without grab...")
+
+                iteration = 0
+                while self.running.value:
+                    try:
+                        if not device.fd:
+                            self.logger.warning("JoystickReader: Invalid fd; reconnecting")
+                            break
+                        r, _, _ = select.select([device.fd], [], [], 0.1)
+                        if r:
+                            for event in device.read():
+                                if not self.running.value:
+                                    break
+                                self.process_event(event)
+                        else:
+                            iteration += 1
+                            if iteration % 50 == 0:
+                                self.logger.debug(
+                                    "JoystickReader: Idle waiting for events (%s)",
+                                    iteration,
+                                )
+                    except OSError as e:
+                        self.logger.warning(
+                            "JoystickReader: Device lost (%s); reconnecting...", e
+                        )
                         break
-                    
-                    # Use select to check if events are available (non-blocking check)
-                    r, w, x = select.select([device.fd], [], [], 0.1)
-                    if r:
-                        # Events available, read them
-                        for event in device.read():
-                            self.logger.info(f"JoystickReader: Received event: type={event.type}, code={event.code}, value={event.value}")
-                            if not self.running.value:
-                                self.logger.info("JoystickReader: Stopping (running=False)")
-                                break
-                            # Log that we received an event
-                            self.logger.debug(f"JoystickReader: Received event: type={event.type}, code={event.code}, value={event.value}")
-                            self.process_event(event)
-                    else:
-                        # No events, log periodically to show we're alive
-                        iteration += 1
-                        if iteration % 50 == 0:  # Every 5 seconds (50 * 0.1s)
-                            self.logger.debug(f"JoystickReader: Still waiting for events (iteration {iteration})")
-                except OSError as e:
-                    # Device might have been disconnected
-                    self.logger.error(f"JoystickReader: Device error: {e}", exc_info=True)
-                    break
-                except Exception as e:
-                    self.logger.error(f"JoystickReader: Error in read loop: {e}", exc_info=True)
-                    time.sleep(0.1)
-        except Exception as e:
-            self.logger.error(f"JoystickReader: Fatal error: {e}", exc_info=True)
-        finally:
-            if device:
-                try:
-                    device.ungrab()
-                    self.logger.debug("JoystickReader: Ungrabbed device")
-                except:
-                    pass
-                try:
-                    device.close()
-                except:
-                    pass
-            self.logger.info("JoystickReader: Exited")
+                    except Exception as e:
+                        self.logger.error(
+                            "JoystickReader: Read loop error: %s", e, exc_info=True
+                        )
+                        time.sleep(0.1)
+                session_ok = True
+            except Exception as e:
+                self.logger.warning(
+                    "JoystickReader: Open %s failed (%s); retry in %.1fs",
+                    path,
+                    e,
+                    self.reconnect_delay,
+                )
+                time.sleep(self.reconnect_delay)
+                continue
+            finally:
+                if device is not None:
+                    try:
+                        device.ungrab()
+                    except Exception:
+                        pass
+                    try:
+                        device.close()
+                    except Exception:
+                        pass
+
+            if not self.running.value:
+                break
+
+            if session_ok:
+                self.logger.info(
+                    "JoystickReader: Session ended; neutral output, pause %.1fs",
+                    self.reconnect_delay,
+                )
+                self._reset_and_publish_neutral()
+                time.sleep(self.reconnect_delay)
+
+        self.logger.info("JoystickReader: Exited")
 
 
 class MQTTPublisher:
@@ -467,7 +594,8 @@ class JoystickMQTT:
     
     def __init__(self, device_path, mqtt_broker, mqtt_port, mqtt_topic, 
                  mqtt_username=None, mqtt_password=None, log_file=None,
-                 max_x_speed=1.0, max_y_speed=1.0, max_yaw_speed=1.0):
+                 max_x_speed=1.0, max_y_speed=1.0, max_yaw_speed=1.0,
+                 device_config_key=None, reconnect_auto_detect=True, reconnect_delay=1.0):
         self.device_path = device_path
         self.mqtt_broker = mqtt_broker
         self.mqtt_port = mqtt_port
@@ -477,6 +605,9 @@ class JoystickMQTT:
         self.max_x_speed = max_x_speed
         self.max_y_speed = max_y_speed
         self.max_yaw_speed = max_yaw_speed
+        self.device_config_key = device_config_key
+        self.reconnect_auto_detect = reconnect_auto_detect
+        self.reconnect_delay = reconnect_delay
         
         # Setup logging
         if log_file is None:
@@ -494,6 +625,12 @@ class JoystickMQTT:
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"Logging to file: {log_file}")
         
+        self.logger.info(
+            "Reconnect: %s (interval %.1fs)",
+            "scan for gamepad" if self.reconnect_auto_detect else f"reuse path {self.device_path}",
+            self.reconnect_delay,
+        )
+
         # Verify device exists
         try:
             test_device = InputDevice(device_path)
@@ -546,7 +683,10 @@ class JoystickMQTT:
             log_file=self.log_file,
             max_x_speed=self.max_x_speed,
             max_y_speed=self.max_y_speed,
-            max_yaw_speed=self.max_yaw_speed
+            max_yaw_speed=self.max_yaw_speed,
+            device_config_key=self.device_config_key,
+            reconnect_auto_detect=self.reconnect_auto_detect,
+            reconnect_delay=self.reconnect_delay,
         )
         
         publisher = MQTTPublisher(
@@ -598,7 +738,8 @@ class JoystickMQTT:
 def main():
     parser = argparse.ArgumentParser(description='Read joystick input and publish to MQTT')
     parser.add_argument('--device', '-d', type=str, default=None,
-                       help='Joystick device path (e.g., /dev/input/js0). Auto-detect if not specified')
+                       help='Joystick evdev path (e.g., /dev/input/event22). Auto-detect if not specified; '
+                            'legacy /dev/input/js* nodes are not supported.')
     parser.add_argument('--broker', '-b', type=str, default='localhost',
                        help='MQTT broker address (default: localhost)')
     parser.add_argument('--port', '-p', type=int, default=1883,
@@ -617,10 +758,41 @@ def main():
                        help='Max X speed in m/s (default: 0.5)')
     parser.add_argument('--max-y-speed', type=float, default=0.5,
                        help='Max Y speed in m/s (default: 0.5)')
+    parser.add_argument(
+        '--device-config',
+        type=str,
+        default='auto',
+        choices=sorted(DEVICE_CONFIG_CLI.keys()),
+        help='Axis/button preset: auto (match evdev name), easysmx / xbox360 (EasySMX layout), '
+             'logitech, default',
+    )
+    parser.add_argument('--print-device-name', action='store_true',
+                       help='Print the evdev device name for --device or auto-detect, then exit')
     parser.add_argument('--max-yaw-speed', type=float, default=0.5,
                        help='Max Yaw speed in rad/s (default: 0.5)')
-    
+    parser.add_argument(
+        '--reconnect-delay',
+        type=float,
+        default=1.0,
+        help='Seconds to wait between gamepad disconnect and reopen/re-scan (default: 1.0)',
+    )
+
     args = parser.parse_args()
+    
+    if args.print_device_name:
+        logging.basicConfig(level=logging.WARNING, format='%(message)s')
+        device_path = args.device
+        if device_path is None:
+            device_path = find_joystick_device_path()
+            if device_path is None:
+                logging.error("No joystick device found; specify --device PATH")
+                return 1
+        ok, detail = verify_joystick_device_path(device_path)
+        if not ok:
+            logging.error(detail)
+            return 1
+        print(detail)
+        return 0
     
     # Setup basic logging early so we can see device detection messages
     log_file = args.log_file if args.log_file else "joystick_mqtt.py.log"
@@ -641,15 +813,23 @@ def main():
         if device_path is None:
             logging.error("Error: No joystick device found. Please specify --device")
             return 1
-        else:
-            # Log the detected device name
-            try:
-                device = InputDevice(device_path)
-                logging.info(f"Auto-detected joystick device: {device.name} at {device_path}")
-            except Exception as e:
-                logging.warning(f"Found device path {device_path} but couldn't open it: {e}")
+        logging.info("Auto-detected gamepad path: %s", device_path)
     
     logging.info(f"Using joystick device: {device_path}")
+    ok, detail = verify_joystick_device_path(device_path)
+    if not ok:
+        logging.error(detail)
+        return 1
+    logging.info("Joystick device check OK: %s", detail)
+    device_config_key = DEVICE_CONFIG_CLI[args.device_config]
+    if device_config_key is not None:
+        logging.info("Joystick mapping preset: %s (forced)", device_config_key)
+    reconnect_auto_detect = args.device is None
+    if not reconnect_auto_detect:
+        logging.info(
+            "Reconnect will retry path %s (use auto-detect at launch omitting --device to re-scan)",
+            device_path,
+        )
     try:
         joystick_mqtt = JoystickMQTT(
             device_path=device_path,
@@ -661,7 +841,10 @@ def main():
             log_file=args.log_file,
             max_x_speed=args.max_x_speed,
             max_y_speed=args.max_y_speed,
-            max_yaw_speed=args.max_yaw_speed
+            max_yaw_speed=args.max_yaw_speed,
+            device_config_key=device_config_key,
+            reconnect_auto_detect=reconnect_auto_detect,
+            reconnect_delay=args.reconnect_delay,
         )
         joystick_mqtt.run(publish_interval=args.interval)
     except Exception as e:

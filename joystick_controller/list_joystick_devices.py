@@ -84,20 +84,62 @@ def is_gamepad_device(device, caps):
     
     return is_gamepad
 
-def find_joystick_device_path():
-    """Find and return the first available joystick device path"""
-    import glob
-    
-    # Check /dev/input/js* devices first (these are always joysticks)
-    js_devices = glob.glob('/dev/input/js*')
-    for path in sorted(js_devices):
+
+def verify_joystick_device_path(path):
+    """
+    Check that ``path`` is an evdev node usable for gamepad input.
+
+    evdev only works with /dev/input/event* devices, not legacy /dev/input/js*.
+    Returns (ok, detail) where detail is the device name if ok, else an error message.
+    """
+    if not path:
+        return False, "No device path given"
+    if not os.path.exists(path):
+        return False, f"Device path does not exist: {path}"
+
+    try:
+        device = InputDevice(path)
+    except OSError as e:
+        if "/dev/input/js" in path:
+            return False, (
+                f"Cannot open {path} with evdev ({e}). "
+                "Legacy js* nodes are not evdev; use the matching /dev/input/event* "
+                "device (run list_joystick_devices.py to list them)."
+            )
+        return False, f"Cannot open {path}: {e}"
+    except PermissionError:
+        return False, (
+            f"Permission denied opening {path}. Add your user to the 'input' group "
+            "(sudo usermod -aG input $USER) then re-login, or run from a session with access."
+        )
+    except Exception as e:
+        return False, f"Error opening {path}: {e}"
+
+    try:
+        caps = device.capabilities()
+        name = device.name
+        if not is_gamepad_device(device, caps):
+            return False, (
+                f"{path} ({name}) does not look like a gamepad/joystick "
+                "(expected gamepad axes/buttons). Choose another event node."
+            )
+        return True, name
+    finally:
         try:
-            device = InputDevice(path)
-            return path
+            device.close()
         except Exception:
-            continue
-    
-    # Check /dev/input/event* devices (for Xbox controllers, etc.)
+            pass
+
+
+def get_joystick_device_name(path):
+    """Return the kernel-reported name if ``path`` is a valid gamepad evdev node, else ``None``."""
+    ok, detail = verify_joystick_device_path(path)
+    return detail if ok else None
+
+
+def find_joystick_device_path():
+    """Find and return the first evdev gamepad device path (/dev/input/event*)."""
+    # evdev does not support /dev/input/js* (legacy joystick API); only event nodes.
     event_devices = glob.glob('/dev/input/event*')
     for path in sorted(event_devices):
         try:
@@ -118,19 +160,12 @@ def list_joystick_devices():
     
     devices_found = []
     
-    # Check /dev/input/js* devices
+    # Legacy /dev/input/js* (not usable with evdev — list for reference only)
     js_devices = glob.glob('/dev/input/js*')
+    if js_devices:
+        print("Legacy joystick nodes (evdev needs matching /dev/input/event* instead):\n")
     for path in sorted(js_devices):
-        try:
-            device = InputDevice(path)
-            devices_found.append((path, device.name, device.capabilities()))
-            print(f"✓ Found: {device.name}")
-            print(f"  Path: {path}")
-            print(f"  Capabilities: {list(device.capabilities().keys())}")
-            print()
-        except Exception as e:
-            print(f"✗ Error reading {path}: {e}")
-            print()
+        print(f"  {path}\n")
     
     # Check /dev/input/event* devices (for Xbox controllers, etc.)
     event_devices = glob.glob('/dev/input/event*')

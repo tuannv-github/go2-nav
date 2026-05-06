@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MQTT_BROKER="localhost"
 MQTT_PORT="1883"
 DEVICE=""
+# Optional: axis/button preset passed to joystick_mqtt.py (--device-config): auto, easysmx, xbox360, logitech, default
+DEVICE_CONFIG=""
 MAX_X_SPEED="0.5"
 MAX_Y_SPEED="0.5"
 MAX_YAW_SPEED="0.5"
@@ -32,6 +34,12 @@ else
     echo ""
 fi
 
+DEVICE_CONFIG_ARG=""
+if [ -n "$DEVICE_CONFIG" ]; then
+    DEVICE_CONFIG_ARG="--device-config $DEVICE_CONFIG"
+    echo "Using device config preset: $DEVICE_CONFIG"
+fi
+
 echo "Starting joystick to MQTT publisher..."
 echo "MQTT Broker: $MQTT_BROKER:$MQTT_PORT"
 echo "MQTT Topic: /wirelesscontroller"
@@ -40,6 +48,7 @@ echo ""
 
 # Run the publisher
 ./venv/bin/python3 joystick_mqtt.py $DEVICE_ARG \
+    $DEVICE_CONFIG_ARG \
     --broker "$MQTT_BROKER" \
     --port "$MQTT_PORT" \
     --topic /wirelesscontroller \
