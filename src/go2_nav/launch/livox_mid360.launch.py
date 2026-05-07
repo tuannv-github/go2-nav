@@ -89,7 +89,7 @@ def generate_launch_description():
     )
     livox_z = DeclareLaunchArgument(
         'livox_z',
-        default_value='0.50',
+        default_value='0.35',
         description='Translation Z from tf_parent (m, up). Default matches stock realsense camera height.',
     )
     livox_roll = DeclareLaunchArgument(
@@ -99,7 +99,7 @@ def generate_launch_description():
     )
     livox_pitch = DeclareLaunchArgument(
         'livox_pitch',
-        default_value='20.0',
+        default_value='15.0',
         description='Static TF pitch (deg).',
     )
     livox_yaw = DeclareLaunchArgument(
