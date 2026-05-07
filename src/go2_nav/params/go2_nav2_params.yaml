@@ -141,8 +141,9 @@ controller_server:
 local_costmap:
   local_costmap:
     ros__parameters:
-      update_frequency: 5.0
-      publish_frequency: 5.0
+      # Higher rate → Livox clearing/mark rays apply sooner (snappier obstacle fade).
+      update_frequency: 10.0
+      publish_frequency: 10.0
       # RTAB-Map rgbd_odometry uses frame "vo", not "odom"
       global_frame: vo
       robot_base_frame: base_link
@@ -212,8 +213,10 @@ local_costmap:
 global_costmap:
   global_costmap:
     ros__parameters:
-      update_frequency: 1.0
-      publish_frequency: 1.0
+      # Was 1 Hz: ghost obstacles linger after the robot moves. 5 Hz clears much faster;
+      # raise toward 10 Hz if CPU allows and you still see sticky dynamics.
+      update_frequency: 5.0
+      publish_frequency: 5.0
       global_frame: map
       robot_base_frame: base_link
       use_sim_time: False
