@@ -19,13 +19,14 @@ def _clear_modules(prefixes: tuple[str, ...]) -> None:
             del sys.modules[name]
 
 
-def _load_fastapi_stack() -> tuple[Any, Any, Any]:
+def _load_fastapi_stack() -> tuple[Any, Any, Any, Any, Any]:
     """Import FastAPI/uvicorn with fallback for mixed pydantic environments."""
     try:
         from fastapi import Body, FastAPI
+        from pydantic import BaseModel, Field
         import uvicorn
 
-        return FastAPI, Body, uvicorn
+        return FastAPI, Body, uvicorn, BaseModel, Field
     except Exception as ex:
         # Common on robots: system fastapi (pydantic v1) + user-site pydantic v2.
         if "pydantic" not in str(ex).lower():
@@ -41,9 +42,10 @@ def _load_fastapi_stack() -> tuple[Any, Any, Any]:
         _clear_modules(("fastapi", "pydantic", "starlette"))
 
         from fastapi import Body, FastAPI
+        from pydantic import BaseModel, Field
         import uvicorn
 
-        return FastAPI, Body, uvicorn
+        return FastAPI, Body, uvicorn, BaseModel, Field
 
 
 @dataclass
@@ -68,13 +70,31 @@ class GoalServerNode(Node):
 
         self.goal_pub = self.create_publisher(PoseStamped, goal_topic, 10)
 
-        FastAPI, Body, self._uvicorn = _load_fastapi_stack()
+        FastAPI, Body, self._uvicorn, BaseModel, Field = _load_fastapi_stack()
+        from fastapi.responses import JSONResponse
+
+        self._json_response = JSONResponse
+        self._body = Body
+
+        class GoalRequest(BaseModel):
+            x: float = Field(..., description="Goal X position in meters.")
+            y: float = Field(..., description="Goal Y position in meters.")
+            yaw: float = Field(0.0, description="Goal yaw in radians.")
+            frame_id: str = Field("map", description="ROS frame for this goal pose.")
+
+        self._goal_request_model = GoalRequest
         self._app = FastAPI(
             title="GO2 Goal Server",
             version="1.0.0",
             description="REST API that publishes goals to ROS topic /goal_pose.",
+            openapi_tags=[
+                {
+                    "name": "goal",
+                    "description": "Publish Nav2 goal poses to ROS topic /goal_pose.",
+                }
+            ],
         )
-        self._setup_routes(Body)
+        self._setup_routes()
 
         self._server = self._uvicorn.Server(
             self._uvicorn.Config(
@@ -92,15 +112,58 @@ class GoalServerNode(Node):
         self.get_logger().info(f"Publishing goals to topic: {goal_topic}")
         self.get_logger().info(f"Swagger UI available at: http://{api_host}:{api_port}/docs")
 
-    def _setup_routes(self, Body: Any) -> None:
-        @self._app.get("/health")
+    def _setup_routes(self) -> None:
+        @self._app.get(
+            "/health",
+            tags=["goal"],
+            summary="Health check",
+            description="Returns API server/node health status.",
+        )
         def health() -> dict:
             return {"status": "ok", "node": self.get_name()}
 
-        @self._app.post("/goal")
-        def publish_goal(req: dict = Body(..., example={"x": 1.0, "y": 2.0, "yaw": 1.57, "frame_id": "map"})) -> dict:
-            result = self._publish_goal(req)
-            return {"ok": result.ok, "message": result.message}
+        @self._app.post(
+            "/goal",
+            tags=["goal"],
+            summary="Publish goal pose",
+            description="Accepts a 2D pose and publishes it to ROS topic `/goal_pose` as `geometry_msgs/PoseStamped`.",
+            responses={
+                200: {
+                    "description": "Goal accepted and published to /goal_pose.",
+                    "content": {
+                        "application/json": {
+                            "example": {"ok": True, "message": "Goal published to /goal_pose"}
+                        }
+                    },
+                },
+                400: {
+                    "description": "Bad request payload.",
+                    "content": {
+                        "application/json": {
+                            "example": {
+                                "ok": False,
+                                "message": "Missing required field: x",
+                            }
+                        }
+                    },
+                },
+            },
+        )
+        def publish_goal(req: self._goal_request_model = self._body(..., example={
+            "x": 41.87440490722656,
+            "y": 12.993324279785156,
+            "yaw": 1.88,
+            "frame_id": "map",
+        })) -> dict:
+            try:
+                data = req.dict() if hasattr(req, "dict") else req.model_dump()
+                result = self._publish_goal(data)
+                return {"ok": result.ok, "message": result.message}
+            except (KeyError, TypeError, ValueError) as ex:
+                return self._json_response(
+                    status_code=400,
+                    content={"ok": False, "message": f"Invalid payload: {ex}"},
+                )
 
     @staticmethod
     def _yaw_to_quaternion(yaw: float) -> tuple[float, float, float, float]:

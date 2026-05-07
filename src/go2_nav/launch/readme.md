@@ -54,6 +54,7 @@ This directory contains launch entry points for camera bringup, RTAB-Map SLAM/lo
 
 - Navigation only:
   - `go2_nav2.launch.py` runs Nav2 stack and expects localization/map inputs already running.
+  - It also launches `goal_server` by default (`enable_goal_server:=true`) to expose REST API for `/goal_pose`.
 
 ## Recommended Startup Sequences
 
@@ -75,4 +76,31 @@ This directory contains launch entry points for camera bringup, RTAB-Map SLAM/lo
 - Navigation:
   1. Ensure TF + map/localization are already valid
   2. `ros2 launch go2_nav go2_nav2.launch.py`
+
+## REST Goal API (`goal_server`)
+
+When launching `go2_nav2.launch.py`, the REST API server is enabled by default and publishes goals to `/goal_pose`.
+
+- Swagger UI: `http://<robot-ip>:8080/docs`
+- Health check: `GET /health`
+- Publish goal: `POST /goal`
+
+Example request (from a real `/goal_pose` sample):
+
+```bash
+curl -X POST "http://<robot-ip>:8080/goal" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "x": 41.87440490722656,
+    "y": 12.993324279785156,
+    "yaw": 1.88,
+    "frame_id": "map"
+  }'
+```
+
+Expected response:
+
+```json
+{"ok": true, "message": "Goal published to /goal_pose"}
+```
 

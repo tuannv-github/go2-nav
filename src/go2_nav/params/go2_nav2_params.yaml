@@ -95,7 +95,7 @@ controller_server:
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.25  # meters (planar distance to goal XY)
+      xy_goal_tolerance: 0.3  # meters (planar distance to goal XY)
       yaw_goal_tolerance: 0.7853981633974483  # radians (45 deg)
     # DWB parameters - adjusted for Go2 quadruped
     FollowPath:
@@ -277,7 +277,11 @@ planner_server:
     planner_plugins: ["GridBased"]
     GridBased:
       plugin: "nav2_navfn_planner/NavfnPlanner"
-      tolerance: 0.5
+      # MUST be <= general_goal_checker.xy_goal_tolerance (0.3) — otherwise the
+      # planner can produce a path whose endpoint sits up to `tolerance` meters
+      # from the goal, the controller follows it perfectly, and the goal_checker
+      # then rejects "goal reached" forever (until progress_checker times out).
+      tolerance: 0.3
       use_astar: false
       # true: planner may route through unexplored (unknown) map cells.
       allow_unknown: true
