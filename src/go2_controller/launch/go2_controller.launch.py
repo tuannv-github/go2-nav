@@ -5,8 +5,10 @@ Single-node Go2 controller bridge.
 Publishes ``unitree_go/WirelessController`` on ``ros2_topic`` (default ``/wirelesscontroller``)
 for the robot over DDS (e.g. eth0). MQTT JSON teleop has priority; after ``mqtt_timeout_sec`` without
 MQTT, Nav2 ``cmd_vel`` is converted to ``WirelessController``.
-If there is no new MQTT and no new ``cmd_vel`` for ``input_idle_timeout_sec``, all-zero
+If there is no new MQTT / REST command and no new ``cmd_vel`` for ``input_idle_timeout_sec``, all-zero
 ``WirelessController`` is published (set to ``0`` to disable).
+
+Interactive API docs (Swagger UI): ``http://<bridge_host>:<rest_port>/docs`` (default port ``8081``).
 
 Example::
 
@@ -37,6 +39,10 @@ def generate_launch_description():
         DeclareLaunchArgument('log_each_wireless_publish', default_value='true'),
         DeclareLaunchArgument('input_idle_timeout_sec', default_value='1.0'),
         DeclareLaunchArgument('log_idle_zero_publish', default_value='false'),
+        DeclareLaunchArgument('rest_enable', default_value='true'),
+        DeclareLaunchArgument('rest_host', default_value='0.0.0.0'),
+        DeclareLaunchArgument('rest_port', default_value='8081'),
+        DeclareLaunchArgument('log_each_rest_request', default_value='true'),
 
         Node(
             package='go2_controller',
@@ -59,6 +65,10 @@ def generate_launch_description():
                 'log_each_wireless_publish': LaunchConfiguration('log_each_wireless_publish'),
                 'input_idle_timeout_sec': LaunchConfiguration('input_idle_timeout_sec'),
                 'log_idle_zero_publish': LaunchConfiguration('log_idle_zero_publish'),
+                'rest_enable': LaunchConfiguration('rest_enable'),
+                'rest_host': LaunchConfiguration('rest_host'),
+                'rest_port': LaunchConfiguration('rest_port'),
+                'log_each_rest_request': LaunchConfiguration('log_each_rest_request'),
             }],
         ),
     ])

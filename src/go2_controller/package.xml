@@ -3,7 +3,7 @@
 <package format="3">
   <name>go2_controller</name>
   <version>0.0.1</version>
-  <description>MQTT + Nav2 cmd_vel merged into WirelessController on /wirelesscontroller</description>
+  <description>MQTT + REST (OpenAPI/Swagger) + Nav2 cmd_vel merged into WirelessController on /wirelesscontroller</description>
   <maintainer email="user@example.com">User</maintainer>
   <license>MIT</license>
 
@@ -16,6 +16,8 @@
   <depend>geometry_msgs</depend>
 
   <exec_depend>python3-paho-mqtt</exec_depend>
+  <exec_depend>python3-starlette</exec_depend>
+  <exec_depend>python3-uvicorn</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
