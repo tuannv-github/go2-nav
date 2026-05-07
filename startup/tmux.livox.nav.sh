@@ -50,8 +50,9 @@ kill_previous_children() {
     pkill -f '[r]os2 launch go2_controller go2_controller\.launch\.py' 2>/dev/null || true
     pkill -f '[r]os2 launch realsense_video_publisher video_publisher\.launch\.py' 2>/dev/null || true
     pkill -f '[r]os2 launch go2_nav realsense\.launch\.py' 2>/dev/null || true
-    pkill -f '[r]os2 launch go2_nav imu_timestamp_fixer\.launch\.py' 2>/dev/null || true
     pkill -f '[r]os2 launch go2_nav go2_rtabmap\.location\.launch\.py' 2>/dev/null || true
+    pkill -f '[r]os2 launch go2_nav go2_nav2\.launch\.py' 2>/dev/null || true
+    pkill -f '[r]os2 launch go2_nav livox_mid360\.launch\.py' 2>/dev/null || true
 
     sleep 0.5
 }
@@ -75,8 +76,8 @@ run_pane_cmd() {
 }
 
 # Distribute commands
-# Pane 0: utils/run_go2_controller.sh — MQTT + Nav /cmd_vel → /wirelesscontroller (cyclonedds.go2.xml)
-run_pane_cmd 0 "cd $PROJECT_DIR/utils && ./run_go2_controller.sh"
+# Pane 0: startup/run_go2_controller.sh — MQTT + Nav /cmd_vel → /wirelesscontroller (cyclonedds.go2.xml)
+run_pane_cmd 0 "cd $SCRIPT_DIR && ./run_go2_controller.sh"
 
 # Pane 1: Realsense Video Publisher
 run_pane_cmd 1 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch realsense_video_publisher video_publisher.launch.py"
@@ -85,14 +86,17 @@ run_pane_cmd 1 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch realsense_vi
 run_pane_cmd 2 "cd $PROJECT_DIR && source ./setup.sh && export CYCLONEDDS_URI=file://$PROJECT_DIR/cyclonedds.realsense.xml && ros2 launch go2_nav realsense.launch.py"
 
 # Pane 3: Go2 Nav RTAB-Map
-run_pane_cmd 3 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch go2_nav go2_rtabmap.location.launch.py"
+run_pane_cmd 3 "cd $PROJECT_DIR && source ./setup.sh && ros2 launch go2_nav go2_rtabmap.livox.location.launch.py"
 
-# Separate window: IMU timestamp fixer (dedicated DDS profile)
-if tmux list-windows -t $SESSION -F '#{window_name}' | grep -q '^imu_fixer$'; then
-    tmux kill-window -t $SESSION:imu_fixer
+# Separate window (tab): Livox MID-360 driver (pane 0) + Nav2 stack (pane 1)
+if tmux list-windows -t $SESSION -F '#{window_name}' | grep -q '^nav$'; then
+    tmux kill-window -t $SESSION:nav
 fi
-tmux new-window -t $SESSION -n imu_fixer -c "$PROJECT_DIR"
-tmux send-keys -t "$SESSION:imu_fixer" "cd $PROJECT_DIR && source ./setup.sh && export CYCLONEDDS_URI=file://$PROJECT_DIR/cyclonedds.fixer.xml && ros2 launch go2_nav imu_timestamp_fixer.launch.py" C-m
+tmux new-window -t $SESSION -n nav -c "$PROJECT_DIR"
+tmux send-keys -t "$SESSION:nav.0" "cd $PROJECT_DIR && source ./setup.sh && ros2 launch go2_nav livox_mid360.launch.py" C-m
+tmux split-window -v -t "$SESSION:nav.0" -c "$PROJECT_DIR"
+tmux send-keys -t "$SESSION:nav.1" "cd $PROJECT_DIR && source ./setup.sh && ros2 launch go2_nav go2_nav2.launch.py" C-m
+tmux select-layout -t "$SESSION:nav" even-vertical
 
 # Finalize
 tmux select-pane -t $SESSION:0.0

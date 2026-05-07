@@ -82,14 +82,14 @@ def launch_setup(context, *args, **kwargs):
         else:
             print(f"[go2_rtabmap.livox.mapping] Provided database path does not exist, will create new: {database_path}")
     else:
-        # Mapping launch defaults to a fresh session:
-        # always start without preloading existing map DB.
+        # Mapping launch: continue mapping into the existing project DB if it exists,
+        # otherwise create a fresh one at PROJECT_ROOT_DIR/map/rtabmap.db.
         workspace_dir = get_workspace_root()
         map_db_path = os.path.join(workspace_dir, 'map', 'rtabmap.db')
         database_path = map_db_path
-        database_exists = False
-        if os.path.exists(map_db_path):
-            print(f"[go2_rtabmap.livox.mapping] Existing DB detected but ignored for fresh mapping: {database_path}")
+        database_exists = os.path.exists(map_db_path)
+        if database_exists:
+            print(f"[go2_rtabmap.livox.mapping] Continuing mapping from existing RTAB-Map database: {database_path}")
         else:
             print(f"[go2_rtabmap.livox.mapping] No database found in map directory, will create new: {database_path}")
         print(f"  (Database will be saved to: {database_path})")

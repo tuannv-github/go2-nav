@@ -85,8 +85,8 @@ def generate_launch_description():
     )
     declare_filter_imu = DeclareLaunchArgument(
         'filter_imu',
-        default_value='true',
-        description='Enable imu_filter_madgwick to publish /input/imu/filtered'
+        default_value='false',
+        description='Enable imu_filter_madgwick to publish /input/imu/filtered (disabled by default)'
     )
     
     # Camera transform parameters (adjust based on your camera mounting)

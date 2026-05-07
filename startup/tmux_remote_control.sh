@@ -19,7 +19,7 @@ fi
 # Pane 1: Joystick Controller (Split bottom)
 if ! tmux list-panes -t $SESSION_NAME:0 | grep -q "^1:"; then
     tmux split-window -v -t $SESSION_NAME:0.0 -c "$PROJECT_DIR"
-    tmux send-keys -t $SESSION_NAME:0.1 "cd $PROJECT_DIR/utils && ./run_go2_controller.sh" C-m
+    tmux send-keys -t $SESSION_NAME:0.1 "cd $SCRIPT_DIR && ./run_go2_controller.sh" C-m
 fi
 
 # Pane 2: nload monitor (Vertical split of Pane 1)
