@@ -3,6 +3,12 @@
 # Get the directory where this script is located
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 PROJECT_DIR=$(cd "$SCRIPT_DIR/.." &> /dev/null && pwd)
+
+echo "Setting Jetson to max performance..."
+if ! bash "$SCRIPT_DIR/cpu.sh"; then
+    echo "Warning: failed to apply max performance settings, continuing startup."
+fi
+
 SESSION="go2nav"
 
 # Check if session exists, create if not
