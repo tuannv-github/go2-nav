@@ -29,6 +29,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -113,6 +114,27 @@ def generate_launch_description():
             default_value='30.0',
             description='Publish rate for base_link_project TF.',
         ),
+        DeclareLaunchArgument(
+            'enable_goal_server',
+            default_value='true',
+            choices=['true', 'false'],
+            description='Launch REST goal server that publishes to /goal_pose.',
+        ),
+        DeclareLaunchArgument(
+            'goal_server_host',
+            default_value='0.0.0.0',
+            description='REST goal server bind host.',
+        ),
+        DeclareLaunchArgument(
+            'goal_server_port',
+            default_value='8080',
+            description='REST goal server bind port.',
+        ),
+        DeclareLaunchArgument(
+            'goal_server_frame_id',
+            default_value='map',
+            description='Default frame_id for goals received from REST API.',
+        ),
         Node(
             package='go2_nav',
             executable='base_link_project_tf',
@@ -123,6 +145,20 @@ def generate_launch_description():
                 'base_frame': LaunchConfiguration('project_base_frame'),
                 'projected_frame': LaunchConfiguration('projected_frame'),
                 'publish_rate_hz': LaunchConfiguration('project_tf_rate_hz'),
+            }],
+        ),
+        Node(
+            package='go2_nav',
+            executable='goal_server',
+            name='goal_server',
+            output='screen',
+            condition=IfCondition(LaunchConfiguration('enable_goal_server')),
+            additional_env={'PYTHONNOUSERSITE': '1'},
+            parameters=[{
+                'goal_topic': '/goal_pose',
+                'default_frame_id': LaunchConfiguration('goal_server_frame_id'),
+                'api_host': LaunchConfiguration('goal_server_host'),
+                'api_port': LaunchConfiguration('goal_server_port'),
             }],
         ),
         IncludeLaunchDescription(
