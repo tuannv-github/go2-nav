@@ -134,10 +134,36 @@ def launch_setup(context, *args, **kwargs):
 
     # rgbd_odometry: visual odometry from synced RGB-D (used when Livox cloud is off).
     # icp_odometry: scan_cloud ICP odometry (no RGB-D input); pairs with Livox PointCloud2.
+    # All RTAB-Map params are strings, including numerics. See:
+    # https://github.com/introlab/rtabmap/blob/master/corelib/include/rtabmap/core/Parameters.h
     icp_odom_params = {
         **base_params,
         'subscribe_odom_info': True,
         'scan_cloud_is_2d': False,
+        # Solver iterations: cap at 50, stop early once RMSE delta < Epsilon.
+        'Icp/Iterations': '50',
+        'Icp/Epsilon': '0.001',
+        # Reject ICP fits with <20% inlier correspondences (safer than default 10%).
+        'Icp/CorrespondenceRatio': '0.2',
+        # Spatial filtering of input scan_cloud before ICP.
+        'Icp/VoxelSize': '0.05',
+        'Icp/RangeMin': '0.1',
+        'Icp/RangeMax': '15.0',
+        # Reject ICP transforms whose translation > this (rad/yaw at default ~45 deg).
+        'Icp/MaxTranslation': '1.0',
+        # Max distance for matching a query point to a reference point.
+        # Slightly larger than default (0.1) to recover from coarse motion-model guesses.
+        'Icp/MaxCorrespondenceDistance': '0.15',
+        # Point-to-plane is much more accurate on planar surfaces (floors/walls).
+        'Icp/PointToPlane': 'true',
+        'Icp/PointToPlaneK': '10',
+        # Frame-to-Map odometry (rolling local map) — more accurate than F2F.
+        'Odom/Strategy': '0',
+        'Odom/GuessMotion': 'true',
+        # Quadruped is non-holonomic; restrict the motion model accordingly.
+        'Odom/Holonomic': 'false',
+        # Densify the rolling local map for better small-feature registration.
+        'OdomF2M/ScanSubtractRadius': '0.2',
     }
 
     rgbd_sync_params = {
