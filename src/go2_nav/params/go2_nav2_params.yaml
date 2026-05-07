@@ -127,7 +127,9 @@ controller_server:
       short_circuit_trajectory_evaluation: True
       stateful: True
       critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
-      BaseObstacle.scale: 0.02
+      # Higher = stronger penalty for trajectories that pass through inflated
+      # cost cells, so DWB chooses paths that hug the corridor centerline.
+      BaseObstacle.scale: 0.20
       PathAlign.scale: 32.0
       PathAlign.forward_point_distance: 0.1
       GoalAlign.scale: 24.0
@@ -164,8 +166,12 @@ local_costmap:
       plugins: ["voxel_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.6
+        # Lower factor = gentler cost decay over `inflation_radius`, so the
+        # planner/controller more strongly prefer the centerline of free space.
+        cost_scaling_factor: 2.0
+        # 1.0 m halo around every obstacle cell. Robot footprint extends ~0.72 m
+        # behind base_link, so this keeps clearance >= 0.28 m from the body.
+        inflation_radius: 1.0
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
@@ -258,8 +264,10 @@ global_costmap:
           inf_is_valid: false
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.6
+        # Match local costmap inflation so global plan and local plan agree on
+        # how far to stay from obstacles.
+        cost_scaling_factor: 2.0
+        inflation_radius: 1.0
       always_send_full_costmap: True
 
 planner_server:
