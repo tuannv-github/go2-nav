@@ -62,6 +62,19 @@ kill_previous_children() {
     pkill -f '[r]os2 launch go2_nav go2_nav2\.launch\.py' 2>/dev/null || true
     pkill -f '[r]os2 launch go2_nav livox_mid360\.launch\.py' 2>/dev/null || true
     pkill -f '[a]pp_robots/main\.py' 2>/dev/null || true
+    pkill -f '[p]ython3 main\.py --robot-model' 2>/dev/null || true
+    pkill -f '[r]un_vlaa\.sh' 2>/dev/null || true
+    pkill -f '[a]udio_recorder' 2>/dev/null || true
+    pkill -f '[a]udio_speaker' 2>/dev/null || true
+
+    # Safety net for Option 1 (dynamic Pulse handoff): if a previous run_vlaa.sh
+    # was killed before its EXIT trap could resume Pulse cards, restore them now
+    # so PulseAudio sees the Blink mic / USB speaker again when VLAA is not running.
+    if command -v pactl >/dev/null 2>&1; then
+        pactl list short cards 2>/dev/null \
+            | awk '$2 ~ /Blink500B2|10d6_4803|USB_Composite|0909_005b/ {print $2}' \
+            | xargs -r -I{} pactl suspend-card {} 0 2>/dev/null || true
+    fi
 
     sleep 0.5
 }
@@ -112,7 +125,14 @@ if tmux list-windows -t $SESSION -F '#{window_name}' | grep -q '^llm$'; then
     tmux kill-window -t $SESSION:llm
 fi
 tmux new-window -t $SESSION -n llm -c "$VLAA_APP_ROBOTS"
-tmux send-keys -t "$SESSION:llm.0" "cd \"$VLAA_APP_ROBOTS\" && python3 main.py --robot-model go2" C-m
+# Launch VLAA via run_vlaa.sh, which:
+#   1. waits for the Blink500B2+ mic (wait_for_blink500b2.sh),
+#   2. asks PulseAudio to suspend the Blink + USB Composite cards so PortAudio/
+#      PyAudio can open them via the ALSA hostapi for the lifetime of VLAA,
+#   3. runs `python3 main.py --robot-model go2`,
+#   4. resumes those Pulse cards on exit so the rest of the system can use them.
+# This is the dynamic counterpart to the (old) udev PULSE_IGNORE rules, see fix_audio.md.
+tmux send-keys -t "$SESSION:llm.0" "VLAA_APP_ROBOTS=\"$VLAA_APP_ROBOTS\" bash \"$SCRIPT_DIR/run_vlaa.sh\"" C-m
 
 # Finalize
 tmux select-pane -t $SESSION:0.0
