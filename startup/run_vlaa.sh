@@ -25,6 +25,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETUP_AUDIO_PRIORITY="$SCRIPT_DIR/setup_audio_priority.sh"
+ROUTE_5G="$SCRIPT_DIR/route_5g.sh"
 
 VLAA_APP_ROBOTS="${VLAA_APP_ROBOTS:-$HOME/vlaa/app_robots}"
 VLAA_PULSE_CARD_PATTERNS="${VLAA_PULSE_CARD_PATTERNS:-Blink500B2|10d6_4803|USB_Composite|0909_005b}"
@@ -47,6 +48,20 @@ run_setup_audio_priority() {
         return 0
     fi
     warn "Audio priority setup failed; continuing with best-effort runtime setup."
+    return 1
+}
+
+run_route_5g() {
+    if [ ! -f "$ROUTE_5G" ]; then
+        warn "Missing $ROUTE_5G; skipping 5G route setup."
+        return 1
+    fi
+    log "Applying 5G routes: $ROUTE_5G"
+    if bash "$ROUTE_5G"; then
+        log "5G routes applied."
+        return 0
+    fi
+    warn "5G route setup failed; continuing."
     return 1
 }
 
@@ -99,6 +114,7 @@ run_setup_audio_priority || true
 enable_user_slice_rt || true
 apply_shell_nice
 verify_sched_fifo || true
+run_route_5g || true
 
 list_target_cards() {
     pactl list short cards 2>/dev/null \
