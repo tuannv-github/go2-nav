@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # startup/setup_audio_priority.sh
 #
-# One-time (or re-run after OS upgrade) system tuning so VLAA audio I/O and
-# PulseAudio can use the highest practical CPU scheduling priority on a
-# PREEMPT kernel (e.g. Jetson 5.10.120-tegra).
+# Invoked by startup/run_vlaa.sh on every VLAA launch (sudo).
+# Can also be run manually: sudo bash startup/setup_audio_priority.sh
 #
 # Installs:
 #   /etc/security/limits.d/99-vlaa-audio-priority.conf  (nice -20, rtprio, memlock)
@@ -117,5 +116,4 @@ log "                      ulimit -r   (expect 95)"
 log "                      ulimit -l   (expect unlimited)"
 log "Pulse (after restart): ps -o pid,ni,cls,pri,cmd -p \$(pgrep pulseaudio | head -1)"
 log "  expect NI=-11 on SCHED_OTHER; SCHED_FIFO needs rtkit (may fall back on Jetson)."
-log "SCHED_FIFO test: chrt -f 80 true  (should succeed after setup + re-login)"
-log "VLAA: run_vlaa.sh sets shell nice -20; VLAA_AUDIO_RT_PRIO=80 for audio SCHED_FIFO."
+log "VLAA: run_vlaa.sh enables user.slice RT at startup + nice -20; VLAA_AUDIO_RT_PRIO=80 for SCHED_FIFO."

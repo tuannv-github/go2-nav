@@ -15,30 +15,90 @@
 #                             (default covers Blink500B2+ and the 0909:005b speaker)
 #   VLAA_ALSA_SPEAKER_CARD    ALSA card index for the USB speaker (default: auto from
 #                             /proc/asound/cards line containing "USB Composite Device")
-#   VLAA_AUDIO_NICE           Nice for this shell + python tree (default: -20; needs
-#                             startup/setup_audio_priority.sh + re-login)
-#   VLAA_AUDIO_RT_PRIO        SCHED_FIFO for VLAA audio processes when supported
-#                             (default: 80; set empty to disable)
+#   VLAA_AUDIO_NICE           Nice for this shell + python tree (default: -20)
+#   VLAA_AUDIO_RT_PRIO        SCHED_FIFO for VLAA audio processes (default: 80;
+#                             set empty to disable)
+#
+# Audio priority: calls setup_audio_priority.sh (sudo) then applies nice + SCHED_FIFO.
 
 set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SETUP_AUDIO_PRIORITY="$SCRIPT_DIR/setup_audio_priority.sh"
 
 VLAA_APP_ROBOTS="${VLAA_APP_ROBOTS:-$HOME/vlaa/app_robots}"
 VLAA_PULSE_CARD_PATTERNS="${VLAA_PULSE_CARD_PATTERNS:-Blink500B2|10d6_4803|USB_Composite|0909_005b}"
 VLAA_AUDIO_NICE="${VLAA_AUDIO_NICE:--20}"
 VLAA_AUDIO_RT_PRIO="${VLAA_AUDIO_RT_PRIO:-80}"
+USER_SLICE_RT_RUNTIME=/sys/fs/cgroup/cpu,cpuacct/user.slice/cpu.rt_runtime_us
 export VLAA_AUDIO_NICE VLAA_AUDIO_RT_PRIO
 
 log()  { echo "[run_vlaa] $*"; }
 warn() { echo "[run_vlaa] WARN: $*" >&2; }
 
+run_setup_audio_priority() {
+    if [ ! -f "$SETUP_AUDIO_PRIORITY" ]; then
+        warn "Missing $SETUP_AUDIO_PRIORITY; skipping system audio setup."
+        return 1
+    fi
+    log "Running audio priority setup: $SETUP_AUDIO_PRIORITY"
+    if sudo bash "$SETUP_AUDIO_PRIORITY"; then
+        log "Audio priority setup completed."
+        return 0
+    fi
+    warn "Audio priority setup failed; continuing with best-effort runtime setup."
+    return 1
+}
+
+# Fallback if setup_audio_priority.sh could not enable cgroup RT (e.g. sudo denied).
+enable_user_slice_rt() {
+    [ -n "${VLAA_AUDIO_RT_PRIO:-}" ] || return 0
+    [ -f "$USER_SLICE_RT_RUNTIME" ] || return 0
+
+    local rt_runtime kernel_rt
+    rt_runtime="$(cat "$USER_SLICE_RT_RUNTIME")"
+    if [ "$rt_runtime" != "0" ]; then
+        log "user.slice SCHED_FIFO runtime already enabled ($rt_runtime us)."
+        return 0
+    fi
+
+    kernel_rt="$(cat /proc/sys/kernel/sched_rt_runtime_us 2>/dev/null || echo 950000)"
+    if [ -w "$USER_SLICE_RT_RUNTIME" ]; then
+        echo "$kernel_rt" >"$USER_SLICE_RT_RUNTIME"
+        log "Enabled user.slice SCHED_FIFO runtime ($kernel_rt us)."
+        return 0
+    fi
+    if command -v sudo >/dev/null 2>&1 && sudo -n sh -c "echo '$kernel_rt' > '$USER_SLICE_RT_RUNTIME'" 2>/dev/null; then
+        log "Enabled user.slice SCHED_FIFO runtime via sudo ($kernel_rt us)."
+        return 0
+    fi
+
+    warn "user.slice cpu.rt_runtime_us=0; SCHED_FIFO unavailable."
+    return 1
+}
+
 apply_shell_nice() {
     if ! renice -n "$VLAA_AUDIO_NICE" -p $$ >/dev/null 2>&1; then
-        warn "Could not set nice $VLAA_AUDIO_NICE (run startup/setup_audio_priority.sh and re-login)."
+        warn "Could not set nice $VLAA_AUDIO_NICE (re-login after setup_audio_priority.sh)."
         return 1
     fi
     log "Shell nice set to $VLAA_AUDIO_NICE (python + children inherit CFS priority)."
 }
+
+verify_sched_fifo() {
+    [ -n "${VLAA_AUDIO_RT_PRIO:-}" ] || return 0
+    if chrt -f "$VLAA_AUDIO_RT_PRIO" true 2>/dev/null; then
+        log "SCHED_FIFO available for VLAA audio (prio $VLAA_AUDIO_RT_PRIO)."
+        return 0
+    fi
+    warn "SCHED_FIFO prio $VLAA_AUDIO_RT_PRIO not available; audio will use nice $VLAA_AUDIO_NICE only."
+    return 1
+}
+
+run_setup_audio_priority || true
+enable_user_slice_rt || true
 apply_shell_nice
+verify_sched_fifo || true
 
 list_target_cards() {
     pactl list short cards 2>/dev/null \
