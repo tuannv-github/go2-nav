@@ -66,6 +66,7 @@ kill_previous_children() {
     pkill -f '[r]un_vlaa\.sh' 2>/dev/null || true
     pkill -f '[a]udio_recorder' 2>/dev/null || true
     pkill -f '[a]udio_speaker' 2>/dev/null || true
+    pkill -f '[w]ifi-heartbeat\.sh' 2>/dev/null || true
 
     # Safety net for Option 1 (dynamic Pulse handoff): if a previous run_vlaa.sh
     # was killed before its EXIT trap could resume Pulse cards, restore them now
@@ -133,6 +134,13 @@ tmux new-window -t $SESSION -n llm -c "$VLAA_APP_ROBOTS"
 #   4. resumes those Pulse cards on exit so the rest of the system can use them.
 # This is the dynamic counterpart to the (old) udev PULSE_IGNORE rules, see fix_audio.md.
 tmux send-keys -t "$SESSION:llm.0" "VLAA_APP_ROBOTS=\"$VLAA_APP_ROBOTS\" bash \"$SCRIPT_DIR/run_vlaa.sh\"" C-m
+
+# Window (tab): WiFi heartbeat monitor
+if tmux list-windows -t $SESSION -F '#{window_name}' | grep -q '^wifi$'; then
+    tmux kill-window -t $SESSION:wifi
+fi
+tmux new-window -t $SESSION -n wifi -c "$SCRIPT_DIR"
+tmux send-keys -t "$SESSION:wifi.0" "bash \"$SCRIPT_DIR/wifi-heartbeat.sh\"" C-m
 
 # Finalize
 tmux select-pane -t $SESSION:0.0
