@@ -4,8 +4,12 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 INFO_FILE="${SCRIPT_DIR}/wifi.info"
+LOG_FILE="${WIFI_HEARTBEAT_LOG:-${PROJECT_DIR}/logs/wifi-heartbeat.log}"
 RETRY_SLEEP_SEC=3
+
+mkdir -p "$(dirname "$LOG_FILE")"
 
 read_wifi_info() {
     local key="$1"
@@ -28,6 +32,10 @@ read_wifi_info() {
 INTERFACE="$(read_wifi_info interface)"
 SSID="$(read_wifi_info ssid)"
 PASSWORD="$(read_wifi_info password)"
+
+STATS_RECONNECTS=0
+STATS_RECOVER_STARTS=0
+STATS_WIFI_CONNECT_ATTEMPTS=0
 
 wifi_radio_state() {
     nmcli radio wifi 2>/dev/null || echo "unknown"
@@ -102,20 +110,28 @@ is_healthy() {
     radio_ok && iface_ok && wifi_ok
 }
 
+emit_log() {
+    local line="$1"
+    echo "$line"
+    printf '%s\n' "$line" >> "$LOG_FILE"
+}
+
 log_status() {
     local status="$1"
     local detail="${2:-}"
-    local ts radio iface nmcli_state conn
+    local ts radio iface nmcli_state conn stats line
     ts="$(date '+%Y-%m-%d %H:%M:%S')"
     radio="$(wifi_radio_state)"
     iface="$(iface_link_state)"
     nmcli_state="$(nmcli_iface_state)"
     conn="$(current_connection)"
+    stats="reconnects=${STATS_RECONNECTS} recover_starts=${STATS_RECOVER_STARTS} wifi_connect_attempts=${STATS_WIFI_CONNECT_ATTEMPTS}"
     if [[ -n "$detail" ]]; then
-        echo "[${ts}] interface=${INTERFACE} ssid=${SSID} password=${PASSWORD} radio=${radio} iface=${iface} nmcli=${nmcli_state} current_ssid=${conn:-none} status=${status} ${detail}"
+        line="[${ts}] interface=${INTERFACE} ssid=${SSID} password=${PASSWORD} radio=${radio} iface=${iface} nmcli=${nmcli_state} current_ssid=${conn:-none} status=${status} ${stats} ${detail}"
     else
-        echo "[${ts}] interface=${INTERFACE} ssid=${SSID} password=${PASSWORD} radio=${radio} iface=${iface} nmcli=${nmcli_state} current_ssid=${conn:-none} status=${status}"
+        line="[${ts}] interface=${INTERFACE} ssid=${SSID} password=${PASSWORD} radio=${radio} iface=${iface} nmcli=${nmcli_state} current_ssid=${conn:-none} status=${status} ${stats}"
     fi
+    emit_log "$line"
 }
 
 log_action() {
@@ -244,6 +260,7 @@ ensure_wifi_connected() {
     local attempt=0
     while ! is_healthy; do
         attempt=$((attempt + 1))
+        STATS_WIFI_CONNECT_ATTEMPTS=$((STATS_WIFI_CONNECT_ATTEMPTS + 1))
         log_status "disconnected" "step=4_wifi_connect attempt=${attempt} goal=connect_to_${SSID} issues=$(health_issues)"
         run_nmcli wifi_connect device wifi connect "$SSID" password "$PASSWORD" ifname "$INTERFACE" || true
         sleep 2
@@ -257,13 +274,17 @@ ensure_wifi_connected() {
 }
 
 recover_until_connected() {
+    STATS_RECOVER_STARTS=$((STATS_RECOVER_STARTS + 1))
     log_status "disconnected" "recover_start issues=$(health_issues)"
     ensure_radio_on
     ensure_iface_up
     ensure_correct_ssid_or_disconnected
     ensure_wifi_connected
+    STATS_RECONNECTS=$((STATS_RECONNECTS + 1))
     log_status "connected" "recover_done"
 }
+
+log_status "connected" "event=start pid=$$ log_file=${LOG_FILE}"
 
 while true; do
     if ! radio_ok; then

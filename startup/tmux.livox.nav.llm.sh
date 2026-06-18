@@ -67,6 +67,7 @@ kill_previous_children() {
     pkill -f '[a]udio_recorder' 2>/dev/null || true
     pkill -f '[a]udio_speaker' 2>/dev/null || true
     pkill -f '[w]ifi-heartbeat\.sh' 2>/dev/null || true
+    pkill -f '[s]ystem-monitor\.sh' 2>/dev/null || true
 
     # Safety net for Option 1 (dynamic Pulse handoff): if a previous run_vlaa.sh
     # was killed before its EXIT trap could resume Pulse cards, restore them now
@@ -141,6 +142,13 @@ if tmux list-windows -t $SESSION -F '#{window_name}' | grep -q '^wifi$'; then
 fi
 tmux new-window -t $SESSION -n wifi -c "$SCRIPT_DIR"
 tmux send-keys -t "$SESSION:wifi.0" "bash \"$SCRIPT_DIR/wifi-heartbeat.sh\"" C-m
+
+# Window (tab): system monitor (tegrastats + kernel journal append to ~/go2-nav/logs/)
+if tmux list-windows -t $SESSION -F '#{window_name}' | grep -q '^monitor$'; then
+    tmux kill-window -t $SESSION:monitor
+fi
+tmux new-window -t $SESSION -n monitor -c "$SCRIPT_DIR"
+tmux send-keys -t "$SESSION:monitor.0" "bash \"$SCRIPT_DIR/system-monitor.sh\"" C-m
 
 # Finalize
 tmux select-pane -t $SESSION:0.0
