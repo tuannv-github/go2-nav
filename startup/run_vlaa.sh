@@ -15,14 +15,30 @@
 #                             (default covers Blink500B2+ and the 0909:005b speaker)
 #   VLAA_ALSA_SPEAKER_CARD    ALSA card index for the USB speaker (default: auto from
 #                             /proc/asound/cards line containing "USB Composite Device")
+#   VLAA_AUDIO_NICE           Nice for this shell + python tree (default: -20; needs
+#                             startup/setup_audio_priority.sh + re-login)
+#   VLAA_AUDIO_RT_PRIO        SCHED_FIFO for VLAA audio processes when supported
+#                             (default: 80; set empty to disable)
 
 set -u
 
 VLAA_APP_ROBOTS="${VLAA_APP_ROBOTS:-$HOME/vlaa/app_robots}"
 VLAA_PULSE_CARD_PATTERNS="${VLAA_PULSE_CARD_PATTERNS:-Blink500B2|10d6_4803|USB_Composite|0909_005b}"
+VLAA_AUDIO_NICE="${VLAA_AUDIO_NICE:--20}"
+VLAA_AUDIO_RT_PRIO="${VLAA_AUDIO_RT_PRIO:-80}"
+export VLAA_AUDIO_NICE VLAA_AUDIO_RT_PRIO
 
 log()  { echo "[run_vlaa] $*"; }
 warn() { echo "[run_vlaa] WARN: $*" >&2; }
+
+apply_shell_nice() {
+    if ! renice -n "$VLAA_AUDIO_NICE" -p $$ >/dev/null 2>&1; then
+        warn "Could not set nice $VLAA_AUDIO_NICE (run startup/setup_audio_priority.sh and re-login)."
+        return 1
+    fi
+    log "Shell nice set to $VLAA_AUDIO_NICE (python + children inherit CFS priority)."
+}
+apply_shell_nice
 
 list_target_cards() {
     pactl list short cards 2>/dev/null \
