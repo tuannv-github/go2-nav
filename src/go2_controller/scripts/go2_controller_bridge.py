@@ -7,7 +7,8 @@ Go2 controller bridge: single node publishing ``unitree_go/WirelessController`` 
 - If no MQTT and no REST update for ``mqtt_timeout_sec``, **Nav2** commands from ``cmd_vel_topic`` are converted
   to ``WirelessController`` and published at ``publish_rate``.
 - If there is **no new** MQTT, REST, or ``cmd_vel`` for ``input_idle_timeout_sec``,
-  repeatedly publish an all-zero ``WirelessController`` (safe stop).
+  publish an all-zero ``WirelessController`` **once** (safe stop), then pause periodic output
+  until new input arrives.
 
 The robot consumes ``/wirelesscontroller`` over DDS (e.g. eth0 via cyclonedds.go2.xml); there is no
 separate Twist mux or topic_tools relay.
@@ -147,6 +148,27 @@ def _wireless_from_sequence(seq: list) -> WirelessController:
     return m
 
 
+def _wireless_is_zero(wc: WirelessController) -> bool:
+    return (
+        wc.lx == 0.0
+        and wc.ly == 0.0
+        and wc.rx == 0.0
+        and wc.ry == 0.0
+        and wc.keys == 0
+    )
+
+
+def _twist_is_zero(t: Twist) -> bool:
+    return (
+        t.linear.x == 0.0
+        and t.linear.y == 0.0
+        and t.linear.z == 0.0
+        and t.angular.x == 0.0
+        and t.angular.y == 0.0
+        and t.angular.z == 0.0
+    )
+
+
 class Go2ControllerBridge(Node):
     def __init__(self):
         super().__init__('go2_controller_bridge')
@@ -202,6 +224,7 @@ class Go2ControllerBridge(Node):
         self._last_mqtt_time = None
         self._last_rest_time = None
         self._last_input_time = self.get_clock().now()
+        self._periodic_stop_sent = False
         self._mqtt_wc = WirelessController()
         self._nav_twist = Twist()
 
@@ -316,6 +339,10 @@ class Go2ControllerBridge(Node):
     def _on_rest_wireless(self, wc: WirelessController) -> None:
         self._touch_input_activity()
         self._last_rest_time = self.get_clock().now()
+        if _wireless_is_zero(wc):
+            self._periodic_stop_sent = True
+        else:
+            self._periodic_stop_sent = False
         if self._log_each_rest:
             self._log_io(
                 input_kind='rest',
@@ -425,6 +452,10 @@ class Go2ControllerBridge(Node):
             self._mqtt_wc = ros2_msg
             self._touch_input_activity()
             self._last_mqtt_time = self.get_clock().now()
+            if _wireless_is_zero(ros2_msg):
+                self._periodic_stop_sent = True
+            else:
+                self._periodic_stop_sent = False
             if self._log_each_mqtt:
                 mt = self._mqtt_topic_str(getattr(msg, 'topic', self.mqtt_topic))
                 self._log_io(
@@ -451,6 +482,8 @@ class Go2ControllerBridge(Node):
     def _on_cmd_vel(self, msg: Twist):
         self._touch_input_activity()
         self._nav_twist = msg
+        if not _twist_is_zero(msg):
+            self._periodic_stop_sent = False
 
     def _twist_to_wireless(self, t: Twist) -> WirelessController:
         m = WirelessController()
@@ -463,23 +496,30 @@ class Go2ControllerBridge(Node):
         return m
 
     def _tick_nav_fallback(self):
-        """Idle → zero WC; else when MQTT/REST stale, forward Nav cmd_vel as WirelessController."""
+        """Idle → one zero then pause; else forward Nav cmd_vel (zero cmd_vel also once then pause)."""
+        if self._periodic_stop_sent:
+            return
+
         now = self.get_clock().now()
         idle_sec = (now - self._last_input_time).nanoseconds * 1e-9
         if self._input_idle_timeout > 0.0 and idle_sec >= self._input_idle_timeout:
             self._publish_wireless(WirelessController(), source='input_idle_timeout')
+            self._periodic_stop_sent = True
             return
 
         if self._non_nav_input_fresh(now):
             return
 
         wc = self._twist_to_wireless(self._nav_twist)
-        if (
+        if not (
             math.isfinite(wc.lx)
             and math.isfinite(wc.ly)
             and math.isfinite(wc.rx)
             and math.isfinite(wc.ry)
         ):
+            return
+
+        if _wireless_is_zero(wc):
             if self._log_each_nav:
                 self._log_io(
                     input_kind='ros',
@@ -488,6 +528,17 @@ class Go2ControllerBridge(Node):
                     wc=wc,
                 )
             self._publish_wireless(wc, source='nav/cmd_vel')
+            self._periodic_stop_sent = True
+            return
+
+        if self._log_each_nav:
+            self._log_io(
+                input_kind='ros',
+                input_topic=self._cmd_vel_topic,
+                input_msg_type='geometry_msgs/msg/Twist',
+                wc=wc,
+            )
+        self._publish_wireless(wc, source='nav/cmd_vel')
 
     def destroy_node(self):
         try:
