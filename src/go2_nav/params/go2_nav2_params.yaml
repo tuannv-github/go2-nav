@@ -149,6 +149,7 @@ local_costmap:
       # RTAB-Map rgbd_odometry uses frame "vo", not "odom"
       global_frame: vo
       robot_base_frame: base_link
+      transform_tolerance: 0.2
       use_sim_time: False
       rolling_window: true
       # 5x5 m gives 2.5 m radius around the robot (corner reach ~3.5 m).
@@ -169,9 +170,9 @@ local_costmap:
         # Lower factor = gentler cost decay over `inflation_radius`, so the
         # planner/controller more strongly prefer the centerline of free space.
         cost_scaling_factor: 2.0
-        # 1.0 m halo around every obstacle cell. Robot footprint extends ~0.72 m
-        # behind base_link, so this keeps clearance >= 0.28 m from the body.
-        inflation_radius: 1.0
+        # 0.55 m local halo — enough clearance for DWB without flooding the
+        # footprint with inflated cost from nearby walls (was 1.0 m).
+        inflation_radius: 0.55
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -204,9 +205,11 @@ local_costmap:
           # costmap; marking is a hair shorter so the very edge isn't
           # populated from a single noisy return.
           raytrace_max_range: 5.0
-          raytrace_min_range: 0.0
+          # Ignore near-field Livox returns (legs, body, mount). Without this,
+          # points inside the footprint get marked as lethal every scan.
+          raytrace_min_range: 0.45
           obstacle_max_range: 3.5
-          obstacle_min_range: 0.0
+          obstacle_min_range: 0.45
           # Treat "no return" rays as invalid (don't clear out to max range).
           inf_is_valid: false
       always_send_full_costmap: True
@@ -258,9 +261,9 @@ global_costmap:
           min_obstacle_height: 0.05
           max_obstacle_height: 1.5
           raytrace_max_range: 4.0
-          raytrace_min_range: 0.0
+          raytrace_min_range: 0.45
           obstacle_max_range: 3.5
-          obstacle_min_range: 0.0
+          obstacle_min_range: 0.45
           inf_is_valid: false
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"

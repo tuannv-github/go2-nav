@@ -14,6 +14,7 @@ mkdir -p "$LOG_DIR"
 
 TEGRA_PID=""
 JOURNAL_PID=""
+STOPPING=0
 
 append_line() {
     local file="$1"
@@ -28,13 +29,20 @@ log() {
 }
 
 cleanup() {
+    if [[ "$STOPPING" -eq 1 ]]; then
+        return
+    fi
+    STOPPING=1
     local code=$?
-    log "monitor stopping (signal/exit code=${code})"
+    log "monitor stopping (exit=${code})"
     [[ -n "$TEGRA_PID" ]] && kill "$TEGRA_PID" 2>/dev/null || true
     [[ -n "$JOURNAL_PID" ]] && kill "$JOURNAL_PID" 2>/dev/null || true
+    wait "$TEGRA_PID" "$JOURNAL_PID" 2>/dev/null || true
 }
 
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 log "=== monitor start pid=$$ log_dir=${LOG_DIR} ==="
 log "uptime: $(uptime -p 2>/dev/null || uptime)"
@@ -80,6 +88,6 @@ fi
 
 log "monitor running (tegrastats_pid=${TEGRA_PID:-none} journal_pid=${JOURNAL_PID:-none})"
 
-while true; do
-    sleep 3600
-done
+if [[ -n "$TEGRA_PID" || -n "$JOURNAL_PID" ]]; then
+    wait $TEGRA_PID $JOURNAL_PID 2>/dev/null || true
+fi
