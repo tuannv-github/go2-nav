@@ -280,11 +280,27 @@ recover_until_connected() {
     ensure_iface_up
     ensure_correct_ssid_or_disconnected
     ensure_wifi_connected
+    apply_route_script
     STATS_RECONNECTS=$((STATS_RECONNECTS + 1))
     log_status "connected" "recover_done"
 }
 
+apply_route_script() {
+    if [[ -z "${ROUTE_SCRIPT:-}" || ! -f "$ROUTE_SCRIPT" ]]; then
+        return 0
+    fi
+    log_status "connected" "doing=apply_routes script=${ROUTE_SCRIPT}"
+    if bash "$ROUTE_SCRIPT"; then
+        log_status "connected" "done=apply_routes result=ok"
+    else
+        log_status "disconnected" "done=apply_routes result=failed"
+    fi
+}
+
 log_status "connected" "event=start pid=$$ log_file=${LOG_FILE}"
+if is_healthy; then
+    apply_route_script
+fi
 
 while true; do
     if ! radio_ok; then
