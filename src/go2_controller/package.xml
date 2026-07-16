@@ -3,7 +3,7 @@
 <package format="3">
   <name>go2_controller</name>
   <version>0.0.1</version>
-  <description>MQTT + REST (OpenAPI/Swagger) + Nav2 cmd_vel merged into WirelessController on /wirelesscontroller</description>
+  <description>MQTT + REST (OpenAPI/Swagger) + Nav2 cmd_vel; REST /cmd_vel uses sport Move</description>
   <maintainer email="user@example.com">User</maintainer>
   <license>MIT</license>
 
@@ -12,6 +12,7 @@
 
   <depend>rclpy</depend>
   <depend>unitree_go</depend>
+  <depend>unitree_api</depend>
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
 
