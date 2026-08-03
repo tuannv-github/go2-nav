@@ -3,8 +3,9 @@
   <Domain id="any">
     <General>
       <Interfaces>
-        <!-- Prefer robot link on eth0, but keep wlan0 available -->
-        <NetworkInterface name="eth0" priority="2" multicast="default" />
+        <!-- Prefer robot link on eth0, keep wlan0 and usb1 available -->
+        <NetworkInterface name="eth0" priority="3" multicast="default" />
+        <NetworkInterface name="wlan0" priority="2" multicast="default" />
         <NetworkInterface name="usb1" priority="1" multicast="default" />
       </Interfaces>
     </General>
