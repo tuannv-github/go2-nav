@@ -1,0 +1,15 @@
+[Unit]
+Description=Go2 Jetson MAXN + max CPU/GPU/EMC clocks and fan
+After=nvpmodel.service nv.service nvpower.service
+Wants=nvpmodel.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/home/unitree/go2-nav/startup/02_cpu/cpu.sh
+TimeoutStartSec=90
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

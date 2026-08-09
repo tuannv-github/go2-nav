@@ -203,7 +203,7 @@ tmux_stack_restore_pulse_cards() {
 tmux_stack_max_perf() {
     local script_dir=$1
     echo "Setting Jetson to max performance..."
-    if ! bash "$script_dir/cpu.sh"; then
+    if ! bash "$script_dir/02_cpu/cpu.sh"; then
         echo "Warning: failed to apply max performance settings, continuing startup."
     fi
 }
