@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<!-- Template: run_odom.sh rewrites WLAN/PEER IPs into /tmp/fastrtps.odom-ext.xml.
-     Whitelist wlan only so roboticpc is not stuck probing 192.168.123.18. -->
+<!-- Template: @WLAN_IP@ / @PEER_IP@ rewritten into /tmp/fastrtps.odom-ext.xml.
+     Whitelist lo+wlan so on-robot /reset survives DHCP; skip eth0 (192.168.123.18). -->
 <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
   <transport_descriptors>
     <transport_descriptor>
       <transport_id>odom_ext_udp</transport_id>
       <type>UDPv4</type>
       <interfaceWhiteList>
-        <address>10.1.100.210</address>
+        <address>127.0.0.1</address>
+        <address>@WLAN_IP@</address>
       </interfaceWhiteList>
     </transport_descriptor>
   </transport_descriptors>
@@ -39,7 +40,12 @@
         <initialPeersList>
           <locator>
             <udpv4>
-              <address>10.1.100.139</address>
+              <address>127.0.0.1</address>
+            </udpv4>
+          </locator>
+          <locator>
+            <udpv4>
+              <address>@PEER_IP@</address>
             </udpv4>
           </locator>
         </initialPeersList>

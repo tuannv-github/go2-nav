@@ -16,8 +16,9 @@ set -u
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
 export ROS_LOCALHOST_ONLY=0
-if [[ -f /tmp/fastrtps.odom-ext.xml ]]; then
-  export FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/fastrtps.odom-ext.xml
-fi
+
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/fastrtps_odom_ext.sh"
+fastrtps_write_odom_ext_xml "${PROJECT_DIR}" || true
 
 exec ros2 service call /odom_ext_relay/reset std_srvs/srv/Empty

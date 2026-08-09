@@ -11,10 +11,11 @@ Group=unitree
 WorkingDirectory=/home/unitree/go2-nav
 Environment=HOME=/home/unitree
 Environment=ROS_DOMAIN_ID=0
+Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+Environment=CYCLONEDDS_URI=file:///home/unitree/go2-nav/cyclonedds/cyclonedds.eth0.xml
 ExecStart=/home/unitree/go2-nav/startup/00_lower_layer/service_on_off.sh off --retry
 TimeoutStartSec=240
-Restart=on-failure
-RestartSec=30
+# oneshot + Restart leaves a stuck ros2-daemon in the cgroup; script already retries.
 StandardOutput=journal
 StandardError=journal
 

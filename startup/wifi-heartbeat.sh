@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Monitor wlan0 and reconnect to FCCLab via nmcli when needed.
+# Monitor wlan0 and reconnect to the SSID in wifi.info via nmcli when needed.
 
 set -uo pipefail
 

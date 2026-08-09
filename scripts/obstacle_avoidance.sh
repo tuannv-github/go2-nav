@@ -32,6 +32,7 @@ setup_ros() {
   # shellcheck disable=SC1090
   source "$ROS2_SETUP" >/dev/null
   set -u
+  ros2 daemon stop >/dev/null 2>&1 || true
 }
 
 # Publish one Request and capture the next matching Response (by api_id).
@@ -120,12 +121,20 @@ case "$cmd" in
   on|enable|true|1)
     set_enable true
     enable="$(get_enable)"
-    echo "obstacle_avoidance: ON (set=${enable})"
+    if [[ "$enable" != "true" ]]; then
+      echo "error: obstacle_avoidance still OFF after SwitchSet true (get=${enable})" >&2
+      exit 1
+    fi
+    echo "obstacle_avoidance: ON"
     ;;
   off|disable|false|0)
     set_enable false
     enable="$(get_enable)"
-    echo "obstacle_avoidance: OFF (set=${enable})"
+    if [[ "$enable" != "false" ]]; then
+      echo "error: obstacle_avoidance still ON after SwitchSet false (get=${enable})" >&2
+      exit 1
+    fi
+    echo "obstacle_avoidance: OFF"
     ;;
   toggle|switch|"")
     cur="$(get_enable)"

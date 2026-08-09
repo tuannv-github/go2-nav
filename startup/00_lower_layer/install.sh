@@ -60,6 +60,7 @@ sed \
   -e "s|User=unitree|User=${RUN_USER}|g" \
   -e "s|Group=unitree|Group=${RUN_USER}|g" \
   -e "s|Environment=HOME=/home/unitree|Environment=HOME=$(getent passwd "${RUN_USER}" | cut -d: -f6)|g" \
+  -e "s|Environment=CYCLONEDDS_URI=file:///home/unitree/go2-nav/cyclonedds/cyclonedds.eth0.xml|Environment=CYCLONEDDS_URI=file://$(cd "${SCRIPT_DIR}/../.." && pwd)/cyclonedds/cyclonedds.eth0.xml|g" \
   "$UNIT_SRC" >"$UNIT_DST"
 chmod 644 "$UNIT_DST"
 

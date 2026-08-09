@@ -40,15 +40,10 @@ wait_iface() {
 wait_iface eth0 90 || true
 wait_iface wlan0 30 || true
 
-# FastDDS ext /odom: bind wlan IP only + unicast peer (WiFi multicast is slow).
-WLAN_IP="$(ip -4 -o addr show wlan0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1 || true)"
-PEER_IP="${ODOM_EXT_PEER:-10.1.100.139}"
-FASTDDS_XML="${PROJECT_DIR}/fastrtps/fastrtps.odom-ext.xml"
-if [[ -n "${WLAN_IP}" && -f "${FASTDDS_XML}" ]]; then
-  FASTRTPS_RUNTIME="/tmp/fastrtps.odom-ext.xml"
-  sed -e "s/10.1.100.210/${WLAN_IP}/g" -e "s/10.1.100.139/${PEER_IP}/g" \
-    "${FASTDDS_XML}" >"${FASTRTPS_RUNTIME}"
-  export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_RUNTIME}"
+# FastDDS ext /odom: bind wlan IP + unicast peer (WiFi multicast is slow).
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/fastrtps_odom_ext.sh"
+if fastrtps_write_odom_ext_xml "${PROJECT_DIR}"; then
   echo "FastDDS ext wlan=${WLAN_IP} peer=${PEER_IP}"
 else
   echo "warning: no wlan0 IPv4; FastDDS ext will use all interfaces" >&2

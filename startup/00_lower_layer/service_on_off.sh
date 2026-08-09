@@ -10,8 +10,8 @@
 #
 # Default robot_state names (override with LOWER_LAYER_SERVICES):
 #   unitree_lidar_slam voxel_height_mapping
-# Do not ServiceSwitch obstacles_avoid — that kills /api/obstacles_avoid.
-# sport_mode / unitree_lidar / obstacles_avoid are never switched.
+# Obstacle avoidance is disabled via /api/obstacles_avoid (not ServiceSwitch).
+# sport_mode / unitree_lidar / obstacles_avoid process are never ServiceSwitch'd.
 #
 set -euo pipefail
 
@@ -74,6 +74,21 @@ is_wanted() {
   return 1
 }
 
+mono_now() { awk '{print int($1)}' /proc/uptime; }
+
+wait_eth0_dog() {
+  local i
+  for i in $(seq 1 30); do
+    if ip -4 addr show eth0 2>/dev/null | grep -q '192.168.123.' \
+      && ping -c 1 -W 1 192.168.123.161 >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  warn "eth0/dog 192.168.123.161 not ready yet"
+  return 1
+}
+
 setup_ros() {
   if [[ ! -f "$ROS2_SETUP" ]]; then
     echo "error: missing ROS setup: $ROS2_SETUP" >&2
@@ -83,6 +98,9 @@ setup_ros() {
   # shellcheck disable=SC1090
   source "$ROS2_SETUP" >/dev/null
   set -u
+  # Humble ros2 topic uses the daemon; a stale daemon (wrong NIC / no CYCLONEDDS_URI)
+  # never sees /api/robot_state/*. Restart so it inherits eth0 Cyclone from setup.eth0.sh.
+  ros2 daemon stop >/dev/null 2>&1 || true
 }
 
 # Publish one Request and capture the next matching Response (by api_id).
@@ -286,12 +304,16 @@ case "$cmd" in
 esac
 
 if (( RETRY )); then
-  deadline=$((SECONDS + RETRY_SECS))
+  # /proc/uptime is monotonic — wall-clock NTP jumps (Jan→Aug at boot) must not
+  # make RETRY_SECS look already expired.
+  start_mono="$(mono_now)"
+  deadline=$((start_mono + RETRY_SECS))
+  wait_eth0_dog || true
   while true; do
     if run_cmd "$@"; then
       exit 0
     fi
-    if (( SECONDS >= deadline )); then
+    if (( $(mono_now) >= deadline )); then
       echo "error: giving up after ${RETRY_SECS}s" >&2
       exit 1
     fi
