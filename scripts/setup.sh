@@ -22,5 +22,5 @@ else
 fi
 
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-# CycloneDDS peers (see cyclonedds/cyclonedds.xml): 10.1.108.250, 10.1.100.139
+# CycloneDDS peers (see cyclonedds/cyclonedds.xml): 10.1.100.220 (master), 10.1.108.250, 10.1.100.139
 export CYCLONEDDS_URI="file://${SCRIPT_DIR}/cyclonedds/cyclonedds.xml"

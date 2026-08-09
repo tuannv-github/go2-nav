@@ -27,10 +27,11 @@ CMD_VEL_REPUBLISH_INTERVAL_S = 0.05
 SPORT_API_ID_STOPMOVE = 1003
 SPORT_API_ID_MOVE = 1008
 SPORT_REQUEST_TOPIC = '/api/sport/request'
-# Applied to REST /cmd_vel before sport Move: send = command * scale.
-DEFAULT_CMD_VEL_SCALE_VX = 0.88
-DEFAULT_CMD_VEL_SCALE_VY = 1.4
-DEFAULT_CMD_VEL_SCALE_W = 1.25
+# vlaa app_go2 calib: stick/sport send = command * scale (same numbers both paths).
+# Yaw: vlaa GO2_MAX_YAW=2.094 → scale = 1/max (rx = wz * scale), not a max param.
+DEFAULT_CMD_VEL_SCALE_VX = 0.65
+DEFAULT_CMD_VEL_SCALE_VY = 1.65
+DEFAULT_CMD_VEL_SCALE_W = 1.0 / 2.094
 
 try:
     import uvicorn
@@ -1026,11 +1027,14 @@ class Go2ControllerBridge(Node):
             self._periodic_stop_sent = False
 
     def _twist_to_wireless(self, t: Twist) -> WirelessController:
+        # ly = vx * scale_vx, lx = vy * scale_vy, rx = wz * scale_w (w = 1/2.094).
+        vx = float(t.linear.x)
+        vy = float(-t.linear.y) if self._invert_lateral else float(t.linear.y)
+        wz = float(-t.angular.z)
         m = WirelessController()
-        m.ly = float(t.linear.x)
-        m.lx = float(-t.linear.y) if self._invert_lateral else float(t.linear.y)
-        # Go2 control convention is opposite sign from ROS angular.z for yaw.
-        m.rx = float(-t.angular.z)
+        m.ly = vx * self._cmd_vel_scale_vx
+        m.lx = vy * self._cmd_vel_scale_vy
+        m.rx = wz * self._cmd_vel_scale_w
         m.ry = 0.0
         m.keys = 0
         return m

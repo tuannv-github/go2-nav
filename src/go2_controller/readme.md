@@ -23,3 +23,16 @@ curl -s -X POST http://127.0.0.1:8081/cmd_vel \
 ```
 
 Priority: REST → MQTT → Nav. Lower sources are dropped while a higher one is active.
+
+Motion check (cancel Nav2 goal first):
+
+```bash
+./scripts/test_controller_move.sh
+./scripts/test_controller_move.sh --action forward --distance 1.0 --v 0.2
+./scripts/test_controller_move.sh --action left --distance 0.4 --v 0.2
+./scripts/test_controller_move.sh --action right --distance 0.4 --v 0.2
+./scripts/test_controller_move.sh --action turn_left --angle 90 --w 0.5
+./scripts/test_controller_move.sh --action turn_right --angle 90 --w 0.5
+```
+
+See [docs/go2_controller.md](../../docs/go2_controller.md#motion-test-script).

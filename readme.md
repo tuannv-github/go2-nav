@@ -45,6 +45,6 @@ flowchart TB
 ## Docs
 
 - [Architecture](docs/architecture.md)
-- [Go2 controller](docs/go2_controller.md)
+- [Go2 controller](docs/go2_controller.md) (includes [motion test script](docs/go2_controller.md#motion-test-script))
 - [Odom startup](startup/01_odom/readme.md)
 - [RTAB topics](docs/rtab.md)

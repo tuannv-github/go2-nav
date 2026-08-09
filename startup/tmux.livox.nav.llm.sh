@@ -14,15 +14,16 @@ tmux_stack_ensure_four_panes "$SESSION" main "$TMUX_STACK_PROJECT_DIR"
 
 SETUP="cd $TMUX_STACK_PROJECT_DIR && source ./scripts/setup.sh"
 RS_SETUP="export CYCLONEDDS_URI=file://$TMUX_STACK_PROJECT_DIR/cyclonedds/cyclonedds.realsense.xml"
+NAV_SETUP="export CYCLONEDDS_URI=file://$TMUX_STACK_PROJECT_DIR/cyclonedds/cyclonedds.nav.xml"
 
 tmux_stack_run_pane "$SESSION" main 0 "cd $SCRIPT_DIR && ./run_go2_controller.sh"
 tmux_stack_run_pane "$SESSION" main 1 "$SETUP && ros2 launch realsense_video_publisher video_publisher.launch.py"
 tmux_stack_run_pane "$SESSION" main 2 "$SETUP && $RS_SETUP && ros2 launch go2_nav realsense.launch.py"
-tmux_stack_run_pane "$SESSION" main 3 "$SETUP && ros2 launch go2_nav go2_rtabmap.livox.location.launch.py"
+tmux_stack_run_pane "$SESSION" main 3 "$SETUP && $NAV_SETUP && ros2 launch go2_nav go2_rtabmap.livox.location.launch.py"
 
 tmux_stack_reset_window "$SESSION" nav "$TMUX_STACK_PROJECT_DIR" \
     "$SETUP && ros2 launch go2_nav livox_mid360.launch.py" \
-    "$SETUP && ros2 launch go2_nav go2_nav2.launch.py"
+    "$SETUP && $NAV_SETUP && ros2 launch go2_nav go2_nav2.launch.py"
 
 tmux_stack_reset_window "$SESSION" llm "$VLAA_APP_ROBOTS" \
     "VLAA_APP_ROBOTS=\"$VLAA_APP_ROBOTS\" bash \"$SCRIPT_DIR/run_vlaa.sh\""

@@ -6,7 +6,8 @@ bt_navigator:
     global_frame: map
     robot_base_frame: base_link
     odom_topic: /odom
-    bt_loop_duration: 10
+    # 10 ms (100 Hz) overruns on Jetson with RTAB-Map + Livox + LLM.
+    bt_loop_duration: 50
     default_server_timeout: 20
     wait_for_service_timeout: 1000
     # 'default_nav_through_poses_bt_xml' and 'default_nav_to_pose_bt_xml' are use defaults:
@@ -73,8 +74,8 @@ bt_navigator_navigate_to_pose_rclcpp_node:
 controller_server:
   ros__parameters:
     use_sim_time: False
-    # Jetson: 20 Hz can warn under load; 15 Hz is usually enough for Go2-sized robots
-    controller_frequency: 15.0
+    # Jetson: 15 Hz still overruns with Livox costmaps + DWB; 10 Hz is enough at 0.5 m/s.
+    controller_frequency: 10.0
     min_x_velocity_threshold: 0.001
     # Non-holonomic / cmd_vel vy = 0; keep low (upstream TurtleBot-style 0.5 is for holonomic noise)
     min_y_velocity_threshold: 0.0
@@ -97,28 +98,38 @@ controller_server:
       plugin: "nav2_controller::SimpleGoalChecker"
       xy_goal_tolerance: 0.3  # meters (planar distance to goal XY)
       yaw_goal_tolerance: 0.7853981633974483  # radians (45 deg)
-    # DWB parameters - adjusted for Go2 quadruped
+    # Rotation shim + DWB (Nav2's DWA). Shim rotates in place to the path
+    # heading and, once inside XY goal tolerance, to the goal yaw.
     FollowPath:
-      plugin: "dwb_core::DWBLocalPlanner"
+      plugin: "nav2_rotation_shim_controller::RotationShimController"
+      primary_controller: "dwb_core::DWBLocalPlanner"
+      angular_dist_threshold: 0.785
+      angular_disengage_threshold: 0.40
+      forward_sampling_distance: 0.5
+      rotate_to_heading_angular_vel: 1.2
+      max_angular_accel: 0.80
+      simulate_ahead_time: 1.0
+      rotate_to_goal_heading: True
+      closed_loop: True
       debug_trajectory_details: True
       min_vel_x: 0.0          # m/s (no reverse motion)
       min_vel_y: 0.0          # m/s
-      max_vel_x: 0.2          # m/s
+      max_vel_x: 0.5          # m/s
       max_vel_y: 0.0          # m/s
-      max_vel_theta: 0.15     # rad/s
+      max_vel_theta: 1.2      # rad/s
       min_speed_xy: 0.0       # m/s (magnitude in xy plane)
-      max_speed_xy: 0.2       # m/s (>= hypot(max_vel_x, max_vel_y))
+      max_speed_xy: 0.5       # m/s (>= hypot(max_vel_x, max_vel_y))
       min_speed_theta: 0.0    # rad/s
-      acc_lim_x: 0.04         # m/s^2 (0.2/0.04 = 5.0s to max vx from rest)
+      acc_lim_x: 0.05         # m/s^2 (0.5/0.05 = 10s to max vx from rest)
       acc_lim_y: 0.0          # m/s^2
-      acc_lim_theta: 0.03     # rad/s^2 (0.15/0.03 = 5.0s to max w from rest)
-      decel_lim_x: -0.20      # m/s^2 (0.2/0.20 = 1.0s from max vx to 0)
+      acc_lim_theta: 0.40     # rad/s^2 (1.2/0.40 = 3s to max w from rest)
+      decel_lim_x: -1.00      # m/s^2 (0.5/1.00 = 0.5s from max vx to 0)
       decel_lim_y: 0.0        # m/s^2
-      decel_lim_theta: -0.15  # rad/s^2 (0.15/0.15 = 1.0s from max w to 0)
-      vx_samples: 20         # count (DWB samples along x velocity)
+      decel_lim_theta: -1.20  # rad/s^2 (1.2/1.20 = 1.0s from max w to 0)
+      vx_samples: 12         # count (DWB samples along x velocity)
       vy_samples: 1           # count (fixed vy=0)
-      vtheta_samples: 10      # count (DWB samples along angular velocity)
-      sim_time: 10.0           # s (forward simulation horizon for each candidate trajectory)
+      vtheta_samples: 8       # count (DWB samples along angular velocity)
+      sim_time: 4.0           # s (forward simulation horizon for each candidate trajectory)
       linear_granularity: 0.05
       angular_granularity: 0.025
       transform_tolerance: 0.2
@@ -181,12 +192,12 @@ local_costmap:
         footprint_clearing_enabled: True
         # 2D obstacle layer generally clears moving-object ghosts better than
         # VoxelLayer for sparse non-repetitive LiDAR patterns.
-        # Single source: Livox MID-360 PointCloud2 in livox_frame.
+        # Single source: height-filtered Livox (livox_height_filter -> /livox/lidar_nav).
         # TF chain (base_link -> livox_frame) is published by livox_mid360.launch.py.
         # Nav2 transforms the cloud into the costmap global_frame (odom) per tick.
         observation_sources: livox
         livox:
-          topic: /livox/lidar
+          topic: /livox/lidar_nav
           data_type: "PointCloud2"
           marking: True
           clearing: True
@@ -195,19 +206,20 @@ local_costmap:
           clear_after_reading: True
           # Keep only fresh measurements for this source.
           observation_persistence: 0.0
-          expected_update_rate: 0.2
-          # After odom reset, z=0 is lowest pose (on the ground). Mark 8 cm–0.5 m.
-          min_obstacle_height: 0.08
-          max_obstacle_height: 0.5
+          # Period (s): warn if Livox is later than this. 0.2 s was too tight under load.
+          expected_update_rate: 0.5
+          # Height band is applied in base_link by livox_height_filter. odom z of
+          # kept points is ~0.3–0.8 m, so do not clip again here.
+          min_obstacle_height: -1.0
+          max_obstacle_height: 2.0
           # 5x5 m costmap (corner reach ~3.5 m). Raytrace covers the whole
           # costmap; marking is a hair shorter so the very edge isn't
           # populated from a single noisy return.
           raytrace_max_range: 5.0
-          # Ignore near-field Livox returns (legs, body, mount). Without this,
-          # points inside the footprint get marked as lethal every scan.
-          raytrace_min_range: 0.55
+          # Near-field already dropped in livox_height_filter (min_range 0.45).
+          raytrace_min_range: 0.45
           obstacle_max_range: 3.5
-          obstacle_min_range: 0.55
+          obstacle_min_range: 0.45
           # Treat "no return" rays as invalid (don't clear out to max range).
           inf_is_valid: false
       always_send_full_costmap: True
@@ -247,7 +259,7 @@ global_costmap:
         # local costmap obstacle_layer below for consistent marking/clearing.
         observation_sources: livox
         livox:
-          topic: /livox/lidar
+          topic: /livox/lidar_nav
           data_type: "PointCloud2"
           marking: True
           clearing: True
@@ -255,20 +267,21 @@ global_costmap:
           # from moving targets are dropped quickly.
           clear_after_reading: True
           observation_persistence: 0.0
-          expected_update_rate: 0.2
-          min_obstacle_height: 0.08
-          max_obstacle_height: 0.5
+          expected_update_rate: 0.5
+          # Same filtered cloud as local_costmap; do not re-clip odom z.
+          min_obstacle_height: -1.0
+          max_obstacle_height: 2.0
           raytrace_max_range: 4.0
-          raytrace_min_range: 0.55
+          raytrace_min_range: 0.45
           obstacle_max_range: 3.5
-          obstacle_min_range: 0.55
+          obstacle_min_range: 0.45
           inf_is_valid: false
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         # Match local costmap inflation so global plan and local plan agree on
         # how far to stay from obstacles.
         cost_scaling_factor: 2.0
-        inflation_radius: 1.0
+        inflation_radius: 0.55
       always_send_full_costmap: True
 
 planner_server:
@@ -319,9 +332,9 @@ behavior_server:
     transform_tolerance: 0.1
     use_sim_time: false
     simulate_ahead_time: 2.0
-    max_rotational_vel: 0.15
+    max_rotational_vel: 1.2
     min_rotational_vel: 0.01
-    rotational_acc_lim: 0.15
+    rotational_acc_lim: 0.80
 
 robot_state_publisher:
   ros__parameters:
@@ -341,15 +354,14 @@ waypoint_follower:
 velocity_smoother:
   ros__parameters:
     use_sim_time: False
-    smoothing_frequency: 15.0
+    smoothing_frequency: 10.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [0.2, 0.0, 0.15]
-    min_velocity: [0.0, 0.0, -0.15]
-    # Match controller: 5s ramp-up to max (vx 0.2/0.04, w 0.15/0.03);
-    # 1s decel from max to 0 (vx 0.2/0.20, w 0.15/0.15).
-    max_accel: [0.04, 0.0, 0.03]
-    max_decel: [-0.20, 0.0, -0.15]
+    max_velocity: [0.5, 0.0, 1.2]
+    min_velocity: [0.0, 0.0, -1.2]
+    # Linear: slow accel / hard brake. Yaw: faster so 180° in-place is usable.
+    max_accel: [0.05, 0.0, 0.40]
+    max_decel: [-1.00, 0.0, -1.20]
     odom_topic: "/odom"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]

@@ -149,10 +149,10 @@ non-expired command at `publish_rate` until `mqtt_timeout_sec` of silence.
 
 ### `POST /cmd_vel` (sport Move)
 
-SI command, then `send = command × scale`. Defaults: **vx×0.88**, **vy×1.4**, **w×1.25**.
+SI command, then `send = command × scale`. Defaults: **vx×0.65**, **vy×1.65**, **w×(1/2.094)**.
 
 ```bash
-# 0.2 m/s × 0.88 → 0.176 m/s for 5 s, then StopMove
+# 0.2 m/s × 0.65 → 0.13 m/s for 5 s, then StopMove
 curl -s -X POST http://127.0.0.1:8081/cmd_vel \
   -H 'Content-Type: application/json' \
   -d '{"vx":0.2,"vy":0.0,"w":0.0,"duration":5.0}'
@@ -171,17 +171,17 @@ curl -s -X POST http://127.0.0.1:8081/cmd_vel/stop
 
 ```bash
 curl -s http://127.0.0.1:8081/calib
-curl -s -X POST http://127.0.0.1:8081/calib/vx/0.88
+curl -s -X POST http://127.0.0.1:8081/calib/vx/0.65
 curl -s -X POST http://127.0.0.1:8081/calib \
   -H 'Content-Type: application/json' \
-  -d '{"vx":0.88,"vy":1.4,"w":1.25}'
+  -d '{"vx":0.65,"vy":1.65,"w":0.47755}'
 ```
 
 Launch-time overrides (no HTTP):
 
 ```bash
 ros2 launch go2_controller go2_controller.launch.py \
-  cmd_vel_scale_vx:=0.88 cmd_vel_scale_vy:=1.4 cmd_vel_scale_w:=1.25
+  cmd_vel_scale_vx:=0.65 cmd_vel_scale_vy:=1.65 cmd_vel_scale_w:=0.47755
 ```
 
 ## MQTT (optional, lower priority)
@@ -197,13 +197,67 @@ zeros will take over 1 s after the last REST call.
 
 ## Nav2 `/cmd_vel`
 
-Lowest priority. Twist → `WirelessController`:
+Lowest priority. Twist (SI) → sticks uses the same vlaa calib as REST sport Move:
 
-| Twist | Wireless |
-|-------|----------|
-| `linear.x` | `ly` (forward) |
-| `linear.y` | `-lx` if `invert_cmd_vel_lateral` (default true) |
-| `angular.z` | `-rx` (Go2 yaw sign) |
+`stick = si × scale` (no clamp) with defaults **vx×0.65**, **vy×1.65**, **w×(1/2.094)**.
+
+| Twist | Stick | Default |
+|-------|--------|---------|
+| `linear.x` | `ly = vx × scale_vx` | ×0.65 |
+| `linear.y` | `lx = ±vy × scale_vy` | ×1.65; sign flip if `invert_cmd_vel_lateral` |
+| `angular.z` | `rx = -wz × scale_w` | ×1/2.094 (vlaa `GO2_MAX_YAW`) |
+
+Tune online with `GET/POST /calib` (shared with sport Move).
+
+## Motion test script
+
+`scripts/test_controller_move.sh` drives six body-frame motions so you can check
+sign and scale without Nav2:
+
+| `--action` | ROS command | Expected motion |
+|------------|-------------|-----------------|
+| `forward` | `+vx` | Walk forward |
+| `backward` | `-vx` | Walk backward |
+| `left` | `+vy` | Strafe left |
+| `right` | `-vy` | Strafe right |
+| `turn_left` | `+wz` | Yaw CCW |
+| `turn_right` | `-wz` | Yaw CW (clockwise from above) |
+
+Defaults: **0.4 m** at **0.2 m/s**, **90°** at **0.5 rad/s**, **2 s** countdown,
+**1.5 s** pause between steps. `--action all` (default) runs the six in order.
+
+```bash
+# Cancel any Nav2 goal first. Clear space around the dog.
+cd /home/unitree/go2-nav
+
+# All six motions
+./scripts/test_controller_move.sh
+
+# Forward / left / right / turn
+./scripts/test_controller_move.sh --action forward --distance 1.0 --v 0.2
+./scripts/test_controller_move.sh --action left --distance 0.4 --v 0.2
+./scripts/test_controller_move.sh --action right --distance 0.4 --v 0.2
+./scripts/test_controller_move.sh --action turn_left --angle 90 --w 0.5
+./scripts/test_controller_move.sh --action turn_right --angle 90 --w 0.5
+
+./scripts/test_controller_move.sh --via rest
+./scripts/test_controller_move.sh --via wireless
+```
+
+| `--via` | Path |
+|---------|------|
+| `ros` (default) | Publish `/cmd_vel` Twist — same path as Nav2 → sticks |
+| `rest` | `POST /cmd_vel` sport Move (uses `cmd_vel_scale_*`) |
+| `wireless` | `POST /wireless` with the same SI→stick map as the bridge |
+
+`--via ros` uses `scripts/setup.sh` Cyclone (`cyclonedds.xml`), matching Nav2.
+REST/wireless only need the controller HTTP API on `:8081`.
+
+`scripts/test_controller_rotate.sh` is a wrapper for `--action turn_right`.
+
+Ctrl-C sends a stop (zero Twist, `/cmd_vel/stop`, or zero sticks). Duration is
+`distance/v` or `angle/w` with **no accel ramp**, so the dog may travel a bit
+less than commanded.
 
 ## Launch / node parameters
 
@@ -220,7 +274,7 @@ Lowest priority. Twist → `WirelessController`:
 | `mqtt_timeout_sec` | `1.0` | Hold after last higher-priority message. |
 | `publish_rate` | `50.0` | Hold / Nav republish Hz. |
 | `input_idle_timeout_sec` | `1.0` | One zero then pause; `0` disables. |
-| `cmd_vel_scale_vx` / `_vy` / `_w` | `0.88` / `1.4` / `1.25` | REST sport Move scales. |
+| `cmd_vel_scale_vx` / `_vy` / `_w` | `0.65` / `1.65` / `1/2.094` | REST sport Move and Nav `/cmd_vel`→stick. |
 | `invert_cmd_vel_lateral` | `true` | Flip Nav `linear.y` → `lx`. |
 | `log_each_rest_request` | `true` | Log HTTP apply. |
 | `log_each_mqtt_message` | `true` | Log each MQTT JSON. |

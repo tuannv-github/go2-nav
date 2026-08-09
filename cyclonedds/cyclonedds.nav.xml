@@ -1,18 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- Nav2 / RTAB-Map: advertise on wlan0 for remote PCs, keep eth0 for local /odom.
+     (eth0-only odom must stay off wlan0 — see cyclonedds.odom.xml.) -->
 <CycloneDDS>
   <Domain id="any">
     <General>
       <Interfaces>
-        <!-- Prefer robot link on eth0. usb1 is often absent (this board has usb0). -->
-        <NetworkInterface name="eth0" priority="3" multicast="default" />
         <NetworkInterface name="wlan0" priority="2" multicast="default" presence_required="false" />
-        <NetworkInterface name="usb1" priority="1" multicast="default" presence_required="false" />
-        <NetworkInterface name="usb0" priority="1" multicast="default" presence_required="false" />
+        <NetworkInterface name="eth0" priority="1" multicast="default" />
       </Interfaces>
     </General>
     <Discovery>
       <Peers>
-        <!-- master, then other operator PCs -->
         <Peer address="10.1.100.220"/>
         <Peer address="10.1.108.250"/>
         <Peer address="10.1.100.139"/>

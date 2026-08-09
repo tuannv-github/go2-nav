@@ -9,7 +9,7 @@
     </General>
     <Discovery>
       <Peers>
-        <!-- Point to server -->
+        <Peer address="10.1.100.220"/>
         <Peer address="10.1.108.250"/>
       </Peers>
     </Discovery>

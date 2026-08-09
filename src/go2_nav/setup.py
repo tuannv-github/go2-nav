@@ -21,6 +21,7 @@ setup(
             os.path.join('go2_nav', 'imu_timestamp_fixer', 'imu_timestamp_fixer_node.py'),
             os.path.join('go2_nav', 'base_link_project_tf_node.py'),
             os.path.join('go2_nav', 'goal_server_node.py'),
+            os.path.join('go2_nav', 'livox_height_filter_node.py'),
         ]),
     ],
     install_requires=['setuptools'],
@@ -39,6 +40,7 @@ setup(
             'imu_timestamp_fixer = go2_nav.imu_timestamp_fixer.imu_timestamp_fixer_node:main',
             'base_link_project_tf = go2_nav.base_link_project_tf_node:main',
             'goal_server = go2_nav.goal_server_node:main',
+            'livox_height_filter = go2_nav.livox_height_filter_node:main',
         ],
     },
 )

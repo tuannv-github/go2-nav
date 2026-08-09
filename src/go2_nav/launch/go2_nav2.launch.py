@@ -137,6 +137,22 @@ def generate_launch_description():
         ),
         Node(
             package='go2_nav',
+            executable='livox_height_filter',
+            name='livox_height_filter',
+            output='screen',
+            parameters=[{
+                'input_topic': '/livox/lidar',
+                'output_topic': '/livox/lidar_nav',
+                'height_frame': 'base_link',
+                # Floor sheet in base_link is ~-0.20..0.00 m (standing). Do not use
+                # odom z: base_link is ~0.27 m and the floor sits at ~0.12–0.20 m.
+                'min_z': 0.05,
+                'max_z': 0.50,
+                'min_range': 0.45,
+            }],
+        ),
+        Node(
+            package='go2_nav',
             executable='base_link_project_tf',
             name='base_link_project_tf',
             output='screen',
