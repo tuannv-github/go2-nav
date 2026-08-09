@@ -102,7 +102,17 @@ def launch_setup(context, *args, **kwargs):
         'Grid/RangeMax': '30',
         'GridGlobal/MinSize': '20',
         'Grid/MinClusterSize': '20',
-        'Grid/MaxObstacleHeight': '2',
+        # 2D occupancy in map frame. After odom reset, z=0 is lowest pose (on ground).
+        'Grid/3D': 'false',
+        'Grid/MapFrameProjection': 'true',
+        'Grid/NormalsSegmentation': 'false',
+        'Grid/MinGroundHeight': '-0.20',
+        'Grid/MaxGroundHeight': '0.08',
+        'Grid/MaxObstacleHeight': '0.5',
+        'Grid/RangeMin': '0.45',
+        'Grid/FootprintLength': '0.90',
+        'Grid/FootprintWidth': '0.50',
+        'Grid/FootprintHeight': '0.45',
         'Odom/ResetCountdown': '2',
         'Kp/RoiRatios': '0.0 0.0 0.0 0.4',
     }

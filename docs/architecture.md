@@ -110,6 +110,8 @@ controller          →  /wirelesscontroller  or  sport Move
 
 RTAB livox mapping/location uses external `/odom` (`subscribe_odom_info: false`). `/odom` stamps use NX ROS time so TF is not ~50 min behind the camera.
 
+Occupancy (`/map`) is **2D** in the **map** frame (`Grid/MapFrameProjection`). After odom reset at the lowest pose, **z=0 is the ground**. Hits from ~8 cm to **0.5 m** are projected as obstacles; higher hits are ignored. Near-field / under-body Livox returns are dropped (`Grid/RangeMin=0.45`, robot footprint filter) so the area under the dog is not marked occupied. Nav2 Livox layers use the same height band and ignore range < 0.55 m. Restart RTAB (and Nav2) to apply; remap if the `.db` was built with old grid params.
+
 ## Startup
 
 | Entry | What |

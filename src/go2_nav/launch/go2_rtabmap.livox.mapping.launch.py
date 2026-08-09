@@ -115,7 +115,19 @@ def launch_setup(context, *args, **kwargs):
         'GridGlobal/OccupancyThr': '0.45',
         'GridGlobal/MinSize': '20',
         'Grid/MinClusterSize': '20',
-        'Grid/MaxObstacleHeight': '2',
+        # 2D occupancy in map frame. After odom reset, z=0 is lowest pose (on ground).
+        # z < 0.08 → ground;  0.08–0.5 m → obstacle on /map;  above → ignore (standing does not shift this).
+        'Grid/3D': 'false',
+        'Grid/MapFrameProjection': 'true',
+        'Grid/NormalsSegmentation': 'false',
+        'Grid/MinGroundHeight': '-0.20',
+        'Grid/MaxGroundHeight': '0.08',
+        'Grid/MaxObstacleHeight': '0.5',
+        # Drop Livox/depth hits on legs/belly so cells under the dog are not occupied.
+        'Grid/RangeMin': '0.45',
+        'Grid/FootprintLength': '0.90',
+        'Grid/FootprintWidth': '0.50',
+        'Grid/FootprintHeight': '0.45',
         'Odom/ResetCountdown': '2',
         'Kp/RoiRatios': '0.0 0.0 0.0 0.4',
     }
@@ -132,6 +144,38 @@ def launch_setup(context, *args, **kwargs):
         'subscribe_scan_cloud': enable_livox_cloud,
         'scan_cloud_is_2d': False,
         'subscribe_odom_info': False,
+        # Loop close: stay under ~1 s/update on NX. Vis must not use drifted odom as guess
+        # (log: "All projected points are outside the camera").
+        'Rtabmap/DetectionRate': '1',
+        'Rtabmap/TimeThr': '0',
+        'Rtabmap/LoopThr': '0.11',
+        'RGBD/OptimizeMaxError': '3.0',
+        'RGBD/LinearUpdate': '0.10',
+        'RGBD/AngularUpdate': '0.10',
+        'RGBD/ProximityBySpace': 'true',
+        'RGBD/ProximityByTime': 'false',
+        'RGBD/ProximityMaxGraphDepth': '0',
+        'RGBD/ProximityPathFilteringRadius': '1.5',
+        'RGBD/ProximityMaxPaths': '3',
+        'RGBD/ProximityAngle': '45',
+        'RGBD/LoopClosureReextractFeatures': 'true',
+        'Kp/MaxFeatures': '600',
+        'Kp/NndrRatio': '0.8',
+        'GFTT/MinDistance': '5',
+        'Vis/MinInliers': '15',
+        'Vis/CorNNDR': '0.8',
+        # Search whole image; odom delta is a bad guess on a large loop.
+        'Vis/CorGuessWinSize': '0',
+        'Mem/STMSize': '10',
+        'Mem/RehearsalSimilarity': '0.6',
+        'RGBD/NeighborLinkRefining': 'true' if enable_livox_cloud else 'false',
+        'RGBD/ProximityPathMaxNeighbors': '5' if enable_livox_cloud else '0',
+        'Reg/Strategy': '2' if enable_livox_cloud else '0',
+        'Icp/Iterations': '20',
+        'Icp/MaxCorrespondenceDistance': '1.0',
+        'Icp/MaxTranslation': '3.0',
+        'Icp/MaxRotation': '2.0',
+        'Icp/VoxelSize': '0.1',
     }
 
     imu_topic = '/input/imu/filtered' if filter_imu_enabled else '/input/imu'

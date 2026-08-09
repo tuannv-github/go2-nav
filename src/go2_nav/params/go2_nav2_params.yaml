@@ -163,7 +163,7 @@ local_costmap:
       #   1.2x scaled [[0.12, +/-0.186], [-0.72, +/-0.186]]
       # Final width chosen 0.216 (slightly more lateral margin for IMU/odom drift).
       # Corner order: [front-left, rear-left, rear-right, front-right] (CCW).
-      footprint: "[[0.12, 0.216], [-0.72, 0.216], [-0.72, -0.216], [0.12, -0.216]]"
+      footprint: "[[0.12, 0.26], [-0.72, 0.26], [-0.72, -0.26], [0.12, -0.26]]"
       plugins: ["obstacle_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
@@ -196,20 +196,18 @@ local_costmap:
           # Keep only fresh measurements for this source.
           observation_persistence: 0.0
           expected_update_rate: 0.2
-          # Drop returns whose z (odom frame) is below 5 cm — filters the floor,
-          # the dog's own body, and the lowest part of clutter. Cap at 1.5 m
-          # to skip ceilings / hanging fixtures.
-          min_obstacle_height: 0.05
-          max_obstacle_height: 1.5
+          # After odom reset, z=0 is lowest pose (on the ground). Mark 8 cm–0.5 m.
+          min_obstacle_height: 0.08
+          max_obstacle_height: 0.5
           # 5x5 m costmap (corner reach ~3.5 m). Raytrace covers the whole
           # costmap; marking is a hair shorter so the very edge isn't
           # populated from a single noisy return.
           raytrace_max_range: 5.0
           # Ignore near-field Livox returns (legs, body, mount). Without this,
           # points inside the footprint get marked as lethal every scan.
-          raytrace_min_range: 0.45
+          raytrace_min_range: 0.55
           obstacle_max_range: 3.5
-          obstacle_min_range: 0.45
+          obstacle_min_range: 0.55
           # Treat "no return" rays as invalid (don't clear out to max range).
           inf_is_valid: false
       always_send_full_costmap: True
@@ -226,7 +224,7 @@ global_costmap:
       use_sim_time: False
       # Match local costmap footprint (1.2x Go2 rectangle, base_link near head).
       # See local_costmap above for derivation.
-      footprint: "[[0.12, 0.216], [-0.72, 0.216], [-0.72, -0.216], [0.12, -0.216]]"
+      footprint: "[[0.12, 0.26], [-0.72, 0.26], [-0.72, -0.26], [0.12, -0.26]]"
       resolution: 0.05
       # false: unmapped cells from /map are treated as free on this costmap (do not route around "unknown").
       # true: keeps unknown as separate; pair with planner allow_unknown if you want planner-specific behavior.
@@ -258,12 +256,12 @@ global_costmap:
           clear_after_reading: True
           observation_persistence: 0.0
           expected_update_rate: 0.2
-          min_obstacle_height: 0.05
-          max_obstacle_height: 1.5
+          min_obstacle_height: 0.08
+          max_obstacle_height: 0.5
           raytrace_max_range: 4.0
-          raytrace_min_range: 0.45
+          raytrace_min_range: 0.55
           obstacle_max_range: 3.5
-          obstacle_min_range: 0.45
+          obstacle_min_range: 0.55
           inf_is_valid: false
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
