@@ -1,0 +1,20 @@
+[Unit]
+Description=Go2 reverse SSH tunnel (remote 4123 -> localhost:22)
+After=network-online.target ssh.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=unitree
+Group=unitree
+WorkingDirectory=/home/unitree/go2-nav
+Environment=HOME=/home/unitree
+ExecStart=/home/unitree/go2-nav/startup/03_ssh/run_tunnel.sh
+Restart=always
+RestartSec=10
+TimeoutStartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
