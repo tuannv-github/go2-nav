@@ -1,0 +1,22 @@
+[Unit]
+Description=Disable Go2 onboard mapping/avoidance (lower layer) at boot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=unitree
+Group=unitree
+WorkingDirectory=/home/unitree/go2-nav
+Environment=HOME=/home/unitree
+Environment=ROS_DOMAIN_ID=0
+ExecStart=/home/unitree/go2-nav/startup/lower_layer/service_on_off.sh off --retry
+TimeoutStartSec=240
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
