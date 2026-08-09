@@ -55,7 +55,7 @@ if [[ ! -x "$SERVICE_SCRIPT" ]]; then
 fi
 
 sed \
-  -e "s|/home/unitree/go2-nav/startup/lower_layer/service_on_off.sh|${SERVICE_SCRIPT}|g" \
+  -e "s|^ExecStart=.*service_on_off\\.sh|ExecStart=${SERVICE_SCRIPT}|g" \
   -e "s|WorkingDirectory=/home/unitree/go2-nav|WorkingDirectory=$(cd "${SCRIPT_DIR}/../.." && pwd)|g" \
   -e "s|User=unitree|User=${RUN_USER}|g" \
   -e "s|Group=unitree|Group=${RUN_USER}|g" \

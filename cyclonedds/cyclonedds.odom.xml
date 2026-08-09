@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- eth0 only. Putting wlan0 in the same participant breaks Unitree SPDP
+     (/utlidar/robot_odom stops). WiFi /odom is a separate wlan0 process
+     (see startup/01_odom). -->
+<CycloneDDS>
+  <Domain id="any">
+    <General>
+      <Interfaces>
+        <NetworkInterface name="eth0" priority="default" multicast="default" />
+      </Interfaces>
+    </General>
+  </Domain>
+</CycloneDDS>

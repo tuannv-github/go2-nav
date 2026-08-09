@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- External /odom: all NICs (no name pin == 0.0.0.0 / any).
+     Discovery Tag keeps this off the eth0 Unitree/Nav2 bus. -->
+<CycloneDDS>
+  <Domain id="any">
+    <Discovery>
+      <Tag>go2-odom-ext</Tag>
+      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>32</MaxAutoParticipantIndex>
+    </Discovery>
+  </Domain>
+</CycloneDDS>

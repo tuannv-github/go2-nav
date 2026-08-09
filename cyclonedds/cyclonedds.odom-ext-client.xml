@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Other machine subscribing to /odom (all NICs / 0.0.0.0).
+     - Discovery/Tag must stay go2-odom-ext
+     - Peer = a reachable IPv4 of this robot
+     Same ROS_DOMAIN_ID=0 and rmw_cyclonedds_cpp. -->
+<CycloneDDS>
+  <Domain id="any">
+    <General>
+      <AllowMulticast>false</AllowMulticast>
+    </General>
+    <Discovery>
+      <Tag>go2-odom-ext</Tag>
+      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>120</MaxAutoParticipantIndex>
+      <Peers>
+        <Peer address="10.1.100.210"/>
+      </Peers>
+    </Discovery>
+  </Domain>
+</CycloneDDS>
