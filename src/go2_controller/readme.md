@@ -35,4 +35,10 @@ Motion check (cancel Nav2 goal first):
 ./scripts/test_controller_move.sh --action turn_right --angle 90 --w 0.5
 ```
 
+Watch `/cmd_vel`:
+
+```bash
+./scripts/print_cmd_vel.sh
+```
+
 See [docs/go2_controller.md](../../docs/go2_controller.md#motion-test-script).

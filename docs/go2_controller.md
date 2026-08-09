@@ -209,6 +209,12 @@ Lowest priority. Twist (SI) → sticks uses the same vlaa calib as REST sport Mo
 
 Tune online with `GET/POST /calib` (shared with sport Move).
 
+Watch Nav2 / test Twist live (same Cyclone as Nav):
+
+```bash
+./scripts/print_cmd_vel.sh
+```
+
 ## Motion test script
 
 `scripts/test_controller_move.sh` drives six body-frame motions so you can check

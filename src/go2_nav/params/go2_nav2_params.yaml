@@ -74,11 +74,10 @@ bt_navigator_navigate_to_pose_rclcpp_node:
 controller_server:
   ros__parameters:
     use_sim_time: False
-    # Jetson: 15 Hz still overruns with Livox costmaps + DWB; 10 Hz is enough at 0.5 m/s.
+    # Jetson: 15 Hz still overruns with Livox costmaps + DWB; 10 Hz is enough at 1.0 m/s.
     controller_frequency: 10.0
     min_x_velocity_threshold: 0.001
-    # Non-holonomic / cmd_vel vy = 0; keep low (upstream TurtleBot-style 0.5 is for holonomic noise)
-    min_y_velocity_threshold: 0.0
+    min_y_velocity_threshold: 0.001
     min_theta_velocity_threshold: 0.001
     failure_tolerance: 0.3
     progress_checker_plugin: "progress_checker"
@@ -106,30 +105,30 @@ controller_server:
       angular_dist_threshold: 0.785
       angular_disengage_threshold: 0.40
       forward_sampling_distance: 0.5
-      rotate_to_heading_angular_vel: 1.2
-      max_angular_accel: 0.80
+      rotate_to_heading_angular_vel: 0.8
+      max_angular_accel: 1.20
       simulate_ahead_time: 1.0
       rotate_to_goal_heading: True
       closed_loop: True
       debug_trajectory_details: True
-      min_vel_x: 0.0          # m/s (no reverse motion)
-      min_vel_y: 0.0          # m/s
-      max_vel_x: 0.5          # m/s
-      max_vel_y: 0.0          # m/s
-      max_vel_theta: 1.2      # rad/s
+      min_vel_x: -0.1         # m/s (reverse; 0.10 acc → 1s to max)
+      min_vel_y: -0.1         # m/s
+      max_vel_x: 1.0          # m/s
+      max_vel_y: 0.1          # m/s
+      max_vel_theta: 0.8      # rad/s
       min_speed_xy: 0.0       # m/s (magnitude in xy plane)
-      max_speed_xy: 0.5       # m/s (>= hypot(max_vel_x, max_vel_y))
+      max_speed_xy: 1.01      # m/s (>= hypot(max_vel_x, max_vel_y))
       min_speed_theta: 0.0    # rad/s
-      acc_lim_x: 0.05         # m/s^2 (0.5/0.05 = 10s to max vx from rest)
-      acc_lim_y: 0.0          # m/s^2
-      acc_lim_theta: 0.40     # rad/s^2 (1.2/0.40 = 3s to max w from rest)
-      decel_lim_x: -1.00      # m/s^2 (0.5/1.00 = 0.5s from max vx to 0)
-      decel_lim_y: 0.0        # m/s^2
-      decel_lim_theta: -1.20  # rad/s^2 (1.2/1.20 = 1.0s from max w to 0)
+      acc_lim_x: 0.10         # m/s^2 (1.0/0.10 = 10s to max vx from rest)
+      acc_lim_y: 0.02         # m/s^2 (0.1/0.02 = 5s to max vy from rest)
+      acc_lim_theta: 1.20     # rad/s^2 (0.8/1.20 ≈ 0.7s to max w from rest)
+      decel_lim_x: -1.00      # m/s^2 (1.0/1.00 = 1.0s from max vx to 0)
+      decel_lim_y: -0.10      # m/s^2 (0.1/0.10 = 1.0s from max vy to 0)
+      decel_lim_theta: -0.80  # rad/s^2 (0.8/0.80 = 1.0s from max w to 0)
       vx_samples: 12         # count (DWB samples along x velocity)
-      vy_samples: 1           # count (fixed vy=0)
+      vy_samples: 5           # count (strafe ±0.1)
       vtheta_samples: 8       # count (DWB samples along angular velocity)
-      sim_time: 4.0           # s (forward simulation horizon for each candidate trajectory)
+      sim_time: 2.5           # s (forward simulation horizon for each candidate trajectory)
       linear_granularity: 0.05
       angular_granularity: 0.025
       transform_tolerance: 0.2
@@ -181,9 +180,8 @@ local_costmap:
         # Lower factor = gentler cost decay over `inflation_radius`, so the
         # planner/controller more strongly prefer the centerline of free space.
         cost_scaling_factor: 2.0
-        # 0.55 m local halo — enough clearance for DWB without flooding the
-        # footprint with inflated cost from nearby walls (was 1.0 m).
-        inflation_radius: 0.55
+        # 0.40 m local halo — tighter than global 0.55 so DWB can thread closer.
+        inflation_radius: 0.40
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -332,9 +330,9 @@ behavior_server:
     transform_tolerance: 0.1
     use_sim_time: false
     simulate_ahead_time: 2.0
-    max_rotational_vel: 1.2
+    max_rotational_vel: 0.8
     min_rotational_vel: 0.01
-    rotational_acc_lim: 0.80
+    rotational_acc_lim: 1.20
 
 robot_state_publisher:
   ros__parameters:
@@ -357,11 +355,11 @@ velocity_smoother:
     smoothing_frequency: 10.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [0.5, 0.0, 1.2]
-    min_velocity: [0.0, 0.0, -1.2]
+    max_velocity: [1.0, 0.1, 0.8]
+    min_velocity: [-0.1, -0.1, -0.8]
     # Linear: slow accel / hard brake. Yaw: faster so 180° in-place is usable.
-    max_accel: [0.05, 0.0, 0.40]
-    max_decel: [-1.00, 0.0, -1.20]
+    max_accel: [0.10, 0.02, 1.20]
+    max_decel: [-1.00, -0.10, -0.80]
     odom_topic: "/odom"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]

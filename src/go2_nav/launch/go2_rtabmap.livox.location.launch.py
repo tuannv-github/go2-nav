@@ -143,6 +143,42 @@ def launch_setup(context, *args, **kwargs):
         'subscribe_scan_cloud': enable_livox_cloud,
         'scan_cloud_is_2d': False,
         'subscribe_odom_info': False,
+        # Localization: stay under ~0.5 s/update so corrections are not stale.
+        # utlidar odom covariance is tiny → OptimizeMaxError=3 rejected real ~0.3 m
+        # loop closures (ratio ~9). 0 disables that reject. Variance* loosens odom edges.
+        'Rtabmap/DetectionRate': '1',
+        'Rtabmap/TimeThr': '0',
+        'Rtabmap/LoopThr': '0.11',
+        'RGBD/OptimizeMaxError': '0',
+        'Odom/VarianceLinear': '0.05',
+        'Odom/VarianceAngular': '0.01',
+        'RGBD/LinearUpdate': '0.05',
+        'RGBD/AngularUpdate': '0.05',
+        'RGBD/ProximityBySpace': 'true',
+        'RGBD/ProximityByTime': 'false',
+        'RGBD/ProximityMaxGraphDepth': '0',
+        'RGBD/ProximityPathFilteringRadius': '2.0',
+        'RGBD/ProximityMaxPaths': '5',
+        'RGBD/ProximityAngle': '60',
+        'RGBD/LoopClosureReextractFeatures': 'true',
+        'RGBD/LocalRadius': '15',
+        'RGBD/MaxLocalRetrieved': '4',
+        'Kp/MaxFeatures': '600',
+        'Kp/NndrRatio': '0.8',
+        'GFTT/MinDistance': '5',
+        'Vis/MinInliers': '12',
+        'Vis/CorNNDR': '0.8',
+        'Vis/CorGuessWinSize': '20',
+        'Mem/STMSize': '15',
+        # Scan-to-scan refine warps the odom chain and fights map LC; proximity is enough.
+        'RGBD/NeighborLinkRefining': 'false',
+        'RGBD/ProximityPathMaxNeighbors': '5' if enable_livox_cloud else '0',
+        'Reg/Strategy': '2' if enable_livox_cloud else '0',
+        'Icp/Iterations': '20',
+        'Icp/MaxCorrespondenceDistance': '1.0',
+        'Icp/MaxTranslation': '3.0',
+        'Icp/MaxRotation': '2.0',
+        'Icp/VoxelSize': '0.1',
     }
 
     imu_topic = '/input/imu/filtered' if filter_imu_enabled else '/input/imu'
@@ -219,8 +255,8 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'rtab_cpu_affinity',
-            default_value='0-4',
-            description='CPU affinity for RTAB-Map nodes. Default 0-4 keeps RTAB stack within ~500% CPU total.'
+            default_value='0-6',
+            description='CPU affinity for RTAB-Map nodes. Default 0-6 for heavier localization.'
         ),
         DeclareLaunchArgument(
             'scan_cloud_topic',
