@@ -30,7 +30,7 @@ def launch_setup(context, *args, **kwargs):
         'subscribe_rgbd': True,
         'subscribe_scan_cloud': enable_livox_cloud,
         'scan_cloud_is_2d': False,
-        'subscribe_odom_info': True,
+        'subscribe_odom_info': False,
         'use_action_for_goal': True,
         'wait_for_transform': 0.5,
         # RTAB-Map's parameters should be strings
@@ -54,7 +54,7 @@ def launch_setup(context, *args, **kwargs):
     
     vslam_remappings = [
         ('imu', imu_topic),
-        ('odom', 'vo'),
+        ('odom', '/odom'),
     ]
     if enable_livox_cloud:
         vslam_remappings.append(('scan_cloud', scan_cloud_topic))

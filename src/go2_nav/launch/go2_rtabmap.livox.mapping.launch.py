@@ -2,9 +2,8 @@
 """
 RTAB-Map **mapping** with RealSense RGB-D + Livox MID-360 ``PointCloud2`` fusion.
 
-Odometry: when Livox scan_cloud is enabled (default), **ICP point-cloud odometry**
-(``icp_odometry`` — PCL / libpointmatcher ICP on ``scan_cloud``) publishes ``/vo``.
-With ``enable_livox_cloud:=false``, visual **RGB-D odometry** (``rgbd_odometry``) is used instead.
+Odometry: Unitree lidar via ``go2-odom.service`` (``/odom``, TF ``odom`` → ``base_link``).
+Livox cloud is used for mapping/scan fusion only, not for ICP odometry.
 
 Prerequisites:
     ros2 launch go2_nav realsense.launch.py
@@ -96,7 +95,8 @@ def launch_setup(context, *args, **kwargs):
 
     base_params = {
         'frame_id': 'base_link',
-        'guess_frame_id': 'vo',
+        'guess_frame_id': 'odom',
+        'odom_frame_id': 'odom',
         'Reg/Force3DoF': 'true',
         'approx_sync': True,
         'sync_queue_size': 30,
@@ -120,22 +120,9 @@ def launch_setup(context, *args, **kwargs):
         'Kp/RoiRatios': '0.0 0.0 0.0 0.4',
     }
 
-    sync_odom_params = {
+    rgbd_sync_params = {
         **base_params,
         'subscribe_rgbd': True,
-        'subscribe_odom_info': True,
-    }
-
-    # rgbd_odometry: visual odometry from synced RGB-D (used when Livox cloud is off).
-    # icp_odometry: scan_cloud ICP odometry (no RGB-D input); pairs with Livox PointCloud2.
-    icp_odom_params = {
-        **base_params,
-        'subscribe_odom_info': True,
-        'scan_cloud_is_2d': False,
-    }
-
-    rgbd_sync_params = {
-        **sync_odom_params,
         'approx_sync_max_interval': 0.2,
     }
 
@@ -144,28 +131,12 @@ def launch_setup(context, *args, **kwargs):
         'subscribe_rgbd': True,
         'subscribe_scan_cloud': enable_livox_cloud,
         'scan_cloud_is_2d': False,
-        'subscribe_odom_info': True,
+        'subscribe_odom_info': False,
     }
 
     imu_topic = '/input/imu/filtered' if filter_imu_enabled else '/input/imu'
 
-    odom_remappings = [('odom', 'vo')]
-    if use_imu:
-        odom_remappings.append(('imu', imu_topic))
-
-    icp_odom_remappings = [
-        ('odom', 'vo'),
-        # icp_odometry subscribes to both LaserScan `scan` and PointCloud2 `scan_cloud`;
-        # remap scan to a dummy name so only Livox clouds are used (see RTAB-Map icp_odometry docs).
-        ('scan', '/rtabmap/icp_odometry_unused_scan'),
-        ('scan_cloud', scan_cloud_topic),
-    ]
-    if use_imu:
-        icp_odom_remappings.append(('imu', imu_topic))
-
-    enable_livox_cloud_lc = LaunchConfiguration('enable_livox_cloud')
-
-    rtab_remappings = [('odom', 'vo')]
+    rtab_remappings = [('odom', '/odom')]
     if enable_livox_cloud:
         rtab_remappings.append(('scan_cloud', scan_cloud_topic))
     if use_imu:
@@ -183,26 +154,6 @@ def launch_setup(context, *args, **kwargs):
                 ('rgb/camera_info', '/input/camera/camera/color/camera_info'),
                 ('depth/image', '/input/camera/camera/aligned_depth_to_color/image_raw'),
             ],
-        ),
-        Node(
-            condition=IfCondition(enable_livox_cloud_lc),
-            package='rtabmap_odom',
-            executable='icp_odometry',
-            output='screen',
-            prefix=rtab_prefix,
-            parameters=[icp_odom_params, {'odom_frame_id': 'vo'}],
-            remappings=icp_odom_remappings,
-            arguments=['--ros-args', '--log-level', 'info'],
-        ),
-        Node(
-            condition=UnlessCondition(enable_livox_cloud_lc),
-            package='rtabmap_odom',
-            executable='rgbd_odometry',
-            output='screen',
-            prefix=rtab_prefix,
-            parameters=[sync_odom_params, {'odom_frame_id': 'vo'}],
-            remappings=odom_remappings,
-            arguments=['--ros-args', '--log-level', 'info'],
         ),
         Node(
             condition=UnlessCondition(localization),

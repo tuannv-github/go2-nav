@@ -2,11 +2,10 @@
 """
 Single-node Go2 controller bridge.
 
-Publishes ``unitree_go/WirelessController`` on ``ros2_topic`` (default ``/wirelesscontroller``)
-for the robot over DDS (e.g. eth0). MQTT JSON teleop has priority; after ``mqtt_timeout_sec`` without
-MQTT, Nav2 ``cmd_vel`` is converted to ``WirelessController``.
-If there is no new MQTT / REST command and no new ``cmd_vel`` for ``input_idle_timeout_sec``, all-zero
-``WirelessController`` is published (set to ``0`` to disable).
+Operator API is HTTP REST (``:8081`` /docs). Publishes DDS ``/wirelesscontroller``.
+Priority REST → MQTT → Nav. Higher source applies immediately; lower msgs are dropped
+until ``mqtt_timeout_sec`` (default 1s) with no messages from all higher sources.
+If nothing new for ``input_idle_timeout_sec``, one all-zero ``WirelessController`` then pause.
 
 Interactive API docs (Swagger UI): ``http://<bridge_host>:<rest_port>/docs`` (default port ``8081``).
 

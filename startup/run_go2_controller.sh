@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Launch go2_controller (MQTT → /wirelesscontroller, relay /cmd_vel, mux → /cmd_vel_out).
+# Launch go2_controller (HTTP REST :8081 → DDS /wirelesscontroller + sport Move).
+# Docs: docs/go2_controller.md
 # Uses cyclonedds/cyclonedds.go2.xml so DDS (including /wirelesscontroller) uses the configured interfaces (e.g. eth0).
 # Do not use `set -u` here: colcon `install/setup.bash` uses unset vars (e.g. COLCON_TRACE).
 set -eo pipefail

@@ -3,10 +3,11 @@
   <Domain id="any">
     <General>
       <Interfaces>
-        <!-- Prefer robot link on eth0, keep wlan0 and usb1 available -->
+        <!-- Prefer robot link on eth0. usb1 is often absent (this board has usb0). -->
         <NetworkInterface name="eth0" priority="3" multicast="default" />
-        <NetworkInterface name="wlan0" priority="2" multicast="default" />
-        <NetworkInterface name="usb1" priority="1" multicast="default" />
+        <NetworkInterface name="wlan0" priority="2" multicast="default" presence_required="false" />
+        <NetworkInterface name="usb1" priority="1" multicast="default" presence_required="false" />
+        <NetworkInterface name="usb0" priority="1" multicast="default" presence_required="false" />
       </Interfaces>
     </General>
     <Discovery>

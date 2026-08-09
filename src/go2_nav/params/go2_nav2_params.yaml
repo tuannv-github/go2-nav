@@ -1,11 +1,11 @@
 # Nav2 parameters for Unitree Go2 robot with RTAB-Map VSLAM
-# Uses visual odometry from rtabmap (/vo) and segmented point clouds from camera
+# Uses /odom (utlidar bridge, TF odom -> base_link) and Livox for costmaps
 bt_navigator:
   ros__parameters:
     use_sim_time: False
     global_frame: map
     robot_base_frame: base_link
-    odom_topic: /vo
+    odom_topic: /odom
     bt_loop_duration: 10
     default_server_timeout: 20
     wait_for_service_timeout: 1000
@@ -146,8 +146,8 @@ local_costmap:
       # Higher rate → Livox clearing/mark rays apply sooner (snappier obstacle fade).
       update_frequency: 10.0
       publish_frequency: 10.0
-      # RTAB-Map rgbd_odometry uses frame "vo", not "odom"
-      global_frame: vo
+      # utlidar_odom TF: odom -> base_link
+      global_frame: odom
       robot_base_frame: base_link
       transform_tolerance: 0.2
       use_sim_time: False
@@ -183,7 +183,7 @@ local_costmap:
         # VoxelLayer for sparse non-repetitive LiDAR patterns.
         # Single source: Livox MID-360 PointCloud2 in livox_frame.
         # TF chain (base_link -> livox_frame) is published by livox_mid360.launch.py.
-        # Nav2 transforms the cloud into the costmap global_frame (vo) per tick.
+        # Nav2 transforms the cloud into the costmap global_frame (odom) per tick.
         observation_sources: livox
         livox:
           topic: /livox/lidar
@@ -196,7 +196,7 @@ local_costmap:
           # Keep only fresh measurements for this source.
           observation_persistence: 0.0
           expected_update_rate: 0.2
-          # Drop returns whose z (vo frame) is below 5 cm — filters the floor,
+          # Drop returns whose z (odom frame) is below 5 cm — filters the floor,
           # the dog's own body, and the lowest part of clutter. Cap at 1.5 m
           # to skip ceilings / hanging fixtures.
           min_obstacle_height: 0.05
@@ -315,8 +315,8 @@ behavior_server:
       plugin: "nav2_behaviors/Wait"
     assisted_teleop:
       plugin: "nav2_behaviors/AssistedTeleop"
-    # Match visual odometry frame from rtabmap_odom
-    global_frame: vo
+    # Match utlidar_odom TF frame
+    global_frame: odom
     robot_base_frame: base_link
     transform_tolerance: 0.1
     use_sim_time: false
@@ -352,7 +352,7 @@ velocity_smoother:
     # 1s decel from max to 0 (vx 0.2/0.20, w 0.15/0.15).
     max_accel: [0.04, 0.0, 0.03]
     max_decel: [-0.20, 0.0, -0.15]
-    odom_topic: "/vo"
+    odom_topic: "/odom"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]
     velocity_timeout: 1.0

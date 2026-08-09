@@ -1,20 +1,14 @@
 #!/usr/bin/env python3
 """
-Go2 controller bridge: single node publishing ``unitree_go/WirelessController`` (default ``/wirelesscontroller``).
+Go2 controller bridge: operator API is HTTP REST (``:8081``). The dog still consumes
+DDS ``/wirelesscontroller`` and ``/api/sport/request``.
 
-- **MQTT** (JSON joystick payloads) has priority; each MQTT message is published immediately.
-- **REST** (Starlette + OpenAPI): ``POST /wireless`` with the same JSON fields as MQTT; Swagger UI at ``/docs``.
-- **REST cmd_vel**: ``POST /cmd_vel`` uses Go2 sport ``Move`` (api_id 1008) with real SI speeds
-  ``vx, vy`` in m/s and ``wz`` in rad/s via ``/api/sport/request`` — not WirelessController sticks.
-  Optional ``duration``; omit to hold until ``POST /cmd_vel/stop``.
-- If no MQTT and no REST update for ``mqtt_timeout_sec``, **Nav2** commands from ``cmd_vel_topic`` are converted
-  to ``WirelessController`` and published at ``publish_rate``.
-- If there is **no new** MQTT, REST, or ``cmd_vel`` for ``input_idle_timeout_sec``,
+Priority REST → MQTT → Nav. Higher source applies immediately and **drops** lower
+msgs (MQTT ignored; Nav ``/cmd_vel`` not published). Lower source may apply only
+after ``mqtt_timeout_sec`` (default 1 s) with no msgs from all higher sources.
+- If there is **no new** REST, MQTT, or ``cmd_vel`` for ``input_idle_timeout_sec``,
   publish an all-zero ``WirelessController`` **once** (safe stop), then pause periodic output
   until new input arrives.
-
-The robot consumes ``/wirelesscontroller`` over DDS (e.g. eth0 via cyclonedds/cyclonedds.go2.xml); there is no
-separate Twist mux or topic_tools relay.
 """
 
 import json
@@ -112,11 +106,12 @@ _REST_OPENAPI_SPEC = {
         'title': 'Go2 controller bridge',
         'version': '1.5.0',
         'description': (
-            'WirelessController via MQTT/POST /wireless, and speed-based Go2 sport Move '
-            'via POST /cmd_vel (vx/vy m/s, w/wz rad/s → /api/sport/request api_id 1008). '
+            'Operator API is HTTP. POST /wireless → /wirelesscontroller; '
+            'POST /cmd_vel → sport Move (vx/vy m/s, w/wz rad/s, api_id 1008). '
             f'Default calibration: vx×{DEFAULT_CMD_VEL_SCALE_VX}, '
             f'vy×{DEFAULT_CMD_VEL_SCALE_VY}, w×{DEFAULT_CMD_VEL_SCALE_W}. '
-            'Change online via GET/POST /calib, POST /calib/vx|vy|w/{scale}.'
+            'Change online via GET/POST /calib, POST /calib/vx|vy|w/{scale}. '
+            'Priority REST > MQTT > Nav. Full docs: docs/go2_controller.md.'
         ),
     },
     'tags': [
@@ -362,7 +357,7 @@ class Go2ControllerBridge(Node):
         # ROS I/O
         self.declare_parameter('ros2_topic', '/wirelesscontroller')
         self.declare_parameter('cmd_vel_topic', '/cmd_vel')
-        self.declare_parameter('mqtt_timeout_sec', 1.0)
+        self.declare_parameter('mqtt_timeout_sec', 1.0)  # hold: no higher-priority msg for this long
         self.declare_parameter('publish_rate', 50.0)
         self.declare_parameter('invert_cmd_vel_lateral', True)
         self.declare_parameter('log_each_mqtt_message', True)
@@ -379,7 +374,7 @@ class Go2ControllerBridge(Node):
         self._cmd_vel_topic = self.get_parameter('cmd_vel_topic').get_parameter_value().string_value
         self.mqtt_retry_interval = self.get_parameter('mqtt_retry_interval').get_parameter_value().double_value
         self.mqtt_connect_timeout = self.get_parameter('mqtt_connect_timeout').get_parameter_value().double_value
-        self._mqtt_timeout_sec = self.get_parameter('mqtt_timeout_sec').get_parameter_value().double_value
+        self._preempt_hold_sec = self.get_parameter('mqtt_timeout_sec').get_parameter_value().double_value
         rate_hz = self.get_parameter('publish_rate').get_parameter_value().double_value
         self._invert_lateral = self.get_parameter('invert_cmd_vel_lateral').get_parameter_value().bool_value
         self._log_each_mqtt = self.get_parameter('log_each_mqtt_message').get_parameter_value().bool_value
@@ -405,9 +400,11 @@ class Go2ControllerBridge(Node):
 
         self._last_mqtt_time = None
         self._last_rest_time = None
+        self._last_nav_time = None
         self._last_input_time = self.get_clock().now()
         self._periodic_stop_sent = False
         self._mqtt_wc = WirelessController()
+        self._rest_wc = None
         self._nav_twist = Twist()
         self._move_lock = threading.Lock()
         self._move_stop = threading.Event()
@@ -436,7 +433,8 @@ class Go2ControllerBridge(Node):
 
         self.get_logger().info(
             f'Output WirelessController: {self._out_topic} | MQTT: {self.mqtt_broker}:{self.mqtt_port} '
-            f'{self.mqtt_topic} | cmd_vel: {self._cmd_vel_topic} | mqtt_timeout={self._mqtt_timeout_sec}s | '
+            f'{self.mqtt_topic} | cmd_vel: {self._cmd_vel_topic} | '
+            f'priority rest>mqtt>nav hold={self._preempt_hold_sec}s | '
             f'input_idle_zero={self._input_idle_timeout}s | '
             f'cmd_vel_scale vx×{self._cmd_vel_scale_vx} '
             f'vy×{self._cmd_vel_scale_vy} w×{self._cmd_vel_scale_w}'
@@ -480,6 +478,14 @@ class Go2ControllerBridge(Node):
             thread.join(timeout=1.0)
         self._move_thread = None
 
+    def _preempt_sport_hold_locked(self) -> None:
+        """Caller holds ``_move_lock``. StopMove only if a REST sport hold is running."""
+        active = self._move_thread is not None and self._move_thread.is_alive()
+        if not active:
+            return
+        self._cancel_timed_move()
+        self._sport_stop_move(log=False, as_rest=False)
+
     def _next_sport_req_id(self) -> int:
         self._sport_req_seq = (self._sport_req_seq + 1) % (2**62)
         return int(time.time() * 1000) % (10**9) * 1000 + self._sport_req_seq
@@ -509,10 +515,11 @@ class Go2ControllerBridge(Node):
                 f'api_id={SPORT_API_ID_MOVE} vx={vx:.3f} vy={vy:.3f} wz={vyaw:.3f}'
             )
 
-    def _sport_stop_move(self, log: bool = True) -> None:
+    def _sport_stop_move(self, log: bool = True, as_rest: bool = True) -> None:
         """Go2 sport StopMove (api_id 1003)."""
         self._touch_input_activity()
-        self._last_rest_time = self.get_clock().now()
+        if as_rest:
+            self._last_rest_time = self.get_clock().now()
         self._periodic_stop_sent = True
         self._publish_sport_request(SPORT_API_ID_STOPMOVE, '{}', noreply=False)
         if log and self._log_each_rest:
@@ -526,13 +533,15 @@ class Go2ControllerBridge(Node):
         """Validate JSON body and publish; runs in worker thread (rclpy publish)."""
         if not isinstance(body, dict):
             return False, 'Body must be a JSON object'
+        blocked = self._blocked_by_higher('rest')
+        if blocked:
+            return False, blocked
         try:
             wc = _wireless_from_mapping(body)
         except (TypeError, ValueError) as e:
             return False, str(e)
         with self._move_lock:
-            self._cancel_timed_move()
-            self._sport_stop_move(log=False)
+            self._preempt_sport_hold_locked()
             self._on_rest_wireless(wc, source='rest', log=True)
         return True, ''
 
@@ -711,17 +720,23 @@ class Go2ControllerBridge(Node):
         return True, '', vx, vy, wz, duration
 
     def _rest_cmd_vel(self, body) -> tuple[int, dict]:
+        blocked = self._blocked_by_higher('rest')
+        if blocked:
+            return 409, {'detail': blocked}
         ok, err, vx, vy, wz, duration = self._parse_cmd_vel(body)
         if not ok:
             code = 422 if err.startswith('Body must') else 400
             return code, {'detail': err}
         return 200, self._start_held_sport_move(vx, vy, wz, duration=duration)
 
-    def _rest_cmd_vel_stop(self) -> dict:
+    def _rest_cmd_vel_stop(self) -> tuple[int, dict]:
+        blocked = self._blocked_by_higher('rest')
+        if blocked:
+            return 409, {'detail': blocked}
         with self._move_lock:
             self._cancel_timed_move()
             self._sport_stop_move(log=True)
-        return {'ok': True, 'message': 'stopped', 'backend': 'sport_move'}
+        return 200, {'ok': True, 'message': 'stopped', 'backend': 'sport_move'}
 
     def _start_rest_server(self) -> None:
         bridge = self
@@ -788,6 +803,8 @@ class Go2ControllerBridge(Node):
             ok, err = await run_in_threadpool(bridge._rest_parse_and_apply, body)
             if ok:
                 return JSONResponse({'ok': True})
+            if err.startswith('blocked by'):
+                return JSONResponse({'detail': err}, status_code=409)
             code = 422 if err.startswith('Body must') else 400
             return JSONResponse({'detail': err}, status_code=code)
 
@@ -800,8 +817,8 @@ class Go2ControllerBridge(Node):
             return JSONResponse(payload, status_code=code)
 
         async def cmd_vel_stop_post(_request):
-            payload = await run_in_threadpool(bridge._rest_cmd_vel_stop)
-            return JSONResponse(payload)
+            code, payload = await run_in_threadpool(bridge._rest_cmd_vel_stop)
+            return JSONResponse(payload, status_code=code)
 
         app = Starlette(
             routes=[
@@ -839,6 +856,7 @@ class Go2ControllerBridge(Node):
     ) -> None:
         self._touch_input_activity()
         self._last_rest_time = self.get_clock().now()
+        self._rest_wc = wc
         if _wireless_is_zero(wc):
             self._periodic_stop_sent = True
         else:
@@ -871,7 +889,8 @@ class Go2ControllerBridge(Node):
         """Publish WirelessController and optionally log published message."""
         self.publisher_.publish(wc)
         hide_idle = source == 'input_idle_timeout' and not self._log_idle_zero
-        if self._log_wc_publish and not hide_idle:
+        hide_hold = source.endswith('_hold')
+        if self._log_wc_publish and not hide_idle and not hide_hold:
             self.get_logger().info(
                 f'WirelessController publish topic={self._out_topic} '
                 f'type=unitree_go/msg/WirelessController source={source} '
@@ -881,17 +900,30 @@ class Go2ControllerBridge(Node):
     def _touch_input_activity(self) -> None:
         self._last_input_time = self.get_clock().now()
 
-    def _non_nav_input_fresh(self, now) -> bool:
-        """True if a recent MQTT or REST wireless-style update should block cmd_vel fallback."""
-        if self._last_mqtt_time is not None:
-            dt_mqtt = (now - self._last_mqtt_time).nanoseconds * 1e-9
-            if dt_mqtt < self._mqtt_timeout_sec:
-                return True
-        if self._last_rest_time is not None:
-            dt_rest = (now - self._last_rest_time).nanoseconds * 1e-9
-            if dt_rest < self._mqtt_timeout_sec:
-                return True
-        return False
+    def _age_sec(self, stamp) -> float | None:
+        if stamp is None:
+            return None
+        return (self.get_clock().now() - stamp).nanoseconds * 1e-9
+
+    def _source_active(self, stamp) -> bool:
+        age = self._age_sec(stamp)
+        return age is not None and age < self._preempt_hold_sec
+
+    def _blocked_by_higher(self, source: str) -> str | None:
+        """If a higher-priority source sent a msg within hold window, return why."""
+        if source == 'rest':
+            return None
+        if self._source_active(self._last_rest_time):
+            return (
+                f'blocked by rest; wait {self._preempt_hold_sec:.1f}s after last REST message'
+            )
+        if source == 'mqtt':
+            return None
+        if self._source_active(self._last_mqtt_time):
+            return (
+                f'blocked by mqtt; wait {self._preempt_hold_sec:.1f}s after last MQTT message'
+            )
+        return None
 
     def connect_mqtt_with_retry(self):
         if hasattr(self, '_mqtt_retry_timer'):
@@ -949,10 +981,12 @@ class Go2ControllerBridge(Node):
                 self.get_logger().warn(f'Unexpected MQTT payload: {payload}')
                 return
 
+            blocked = self._blocked_by_higher('mqtt')
+            if blocked:
+                return
             self._mqtt_wc = ros2_msg
             with self._move_lock:
-                self._cancel_timed_move()
-                self._sport_stop_move(log=False)
+                self._preempt_sport_hold_locked()
             self._touch_input_activity()
             self._last_mqtt_time = self.get_clock().now()
             if _wireless_is_zero(ros2_msg):
@@ -983,8 +1017,11 @@ class Go2ControllerBridge(Node):
             self.connect_mqtt_with_retry()
 
     def _on_cmd_vel(self, msg: Twist):
-        self._touch_input_activity()
         self._nav_twist = msg
+        self._last_nav_time = self.get_clock().now()
+        if self._blocked_by_higher('nav'):
+            return
+        self._touch_input_activity()
         if not _twist_is_zero(msg):
             self._periodic_stop_sent = False
 
@@ -999,30 +1036,44 @@ class Go2ControllerBridge(Node):
         return m
 
     def _tick_nav_fallback(self):
-        """Idle → one zero then pause; else forward Nav cmd_vel (zero cmd_vel also once then pause)."""
-        if self._periodic_stop_sent:
+        """Hold last REST/MQTT sticks while they own the bus; else Nav or one idle zero."""
+        if self._source_active(self._last_rest_time):
+            if self._rest_wc is not None:
+                self._publish_wireless(self._rest_wc, source='rest_hold')
+            return
+        if self._source_active(self._last_mqtt_time):
+            self._publish_wireless(self._mqtt_wc, source='mqtt_hold')
+            return
+        if self._blocked_by_higher('nav'):
             return
 
-        now = self.get_clock().now()
-        idle_sec = (now - self._last_input_time).nanoseconds * 1e-9
-        if self._input_idle_timeout > 0.0 and idle_sec >= self._input_idle_timeout:
-            self._publish_wireless(WirelessController(), source='input_idle_timeout')
-            self._periodic_stop_sent = True
-            return
-
-        if self._non_nav_input_fresh(now):
-            return
-
-        wc = self._twist_to_wireless(self._nav_twist)
-        if not (
-            math.isfinite(wc.lx)
-            and math.isfinite(wc.ly)
-            and math.isfinite(wc.rx)
-            and math.isfinite(wc.ry)
-        ):
-            return
-
-        if _wireless_is_zero(wc):
+        nav_age = self._age_sec(self._last_nav_time)
+        nav_fresh = nav_age is not None and (
+            self._input_idle_timeout <= 0.0 or nav_age < self._input_idle_timeout
+        )
+        if nav_fresh:
+            wc = self._twist_to_wireless(self._nav_twist)
+            if not (
+                math.isfinite(wc.lx)
+                and math.isfinite(wc.ly)
+                and math.isfinite(wc.rx)
+                and math.isfinite(wc.ry)
+            ):
+                return
+            if _wireless_is_zero(wc):
+                if self._periodic_stop_sent:
+                    return
+                if self._log_each_nav:
+                    self._log_io(
+                        input_kind='ros',
+                        input_topic=self._cmd_vel_topic,
+                        input_msg_type='geometry_msgs/msg/Twist',
+                        wc=wc,
+                    )
+                self._publish_wireless(wc, source='nav/cmd_vel')
+                self._periodic_stop_sent = True
+                return
+            self._periodic_stop_sent = False
             if self._log_each_nav:
                 self._log_io(
                     input_kind='ros',
@@ -1031,17 +1082,15 @@ class Go2ControllerBridge(Node):
                     wc=wc,
                 )
             self._publish_wireless(wc, source='nav/cmd_vel')
-            self._periodic_stop_sent = True
             return
 
-        if self._log_each_nav:
-            self._log_io(
-                input_kind='ros',
-                input_topic=self._cmd_vel_topic,
-                input_msg_type='geometry_msgs/msg/Twist',
-                wc=wc,
-            )
-        self._publish_wireless(wc, source='nav/cmd_vel')
+        if self._periodic_stop_sent:
+            return
+        now = self.get_clock().now()
+        idle_sec = (now - self._last_input_time).nanoseconds * 1e-9
+        if self._input_idle_timeout > 0.0 and idle_sec >= self._input_idle_timeout:
+            self._publish_wireless(WirelessController(), source='input_idle_timeout')
+            self._periodic_stop_sent = True
 
     def destroy_node(self):
         try:

@@ -33,6 +33,7 @@ def generate_launch_description():
         DeclareLaunchArgument('base_frame', default_value='base_link'),
         DeclareLaunchArgument('zero_at_start', default_value='true'),
         DeclareLaunchArgument('publish_tf', default_value='true'),
+        DeclareLaunchArgument('use_ros_time', default_value='true'),
         DeclareLaunchArgument('relay_pipe', default_value='/tmp/go2_odom.fifo'),
         DeclareLaunchArgument('reset_flag', default_value='/tmp/go2_odom.reset'),
         Node(
@@ -51,6 +52,7 @@ def generate_launch_description():
                 'base_frame': LaunchConfiguration('base_frame'),
                 'zero_at_start': ParameterValue(LaunchConfiguration('zero_at_start'), value_type=bool),
                 'publish_tf': ParameterValue(LaunchConfiguration('publish_tf'), value_type=bool),
+                'use_ros_time': ParameterValue(LaunchConfiguration('use_ros_time'), value_type=bool),
                 'relay_pipe': LaunchConfiguration('relay_pipe'),
                 'reset_flag': LaunchConfiguration('reset_flag'),
             }],

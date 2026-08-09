@@ -60,6 +60,7 @@ class UtlidarOdom(Node):
         self.declare_parameter('base_frame', 'base_link')
         self.declare_parameter('zero_at_start', True)
         self.declare_parameter('publish_tf', True)
+        self.declare_parameter('use_ros_time', True)
         self.declare_parameter('relay_pipe', '/tmp/go2_odom.fifo')
         self.declare_parameter('reset_flag', '/tmp/go2_odom.reset')
 
@@ -69,6 +70,7 @@ class UtlidarOdom(Node):
         self.base_frame = self.get_parameter('base_frame').get_parameter_value().string_value
         self.zero_at_start = self.get_parameter('zero_at_start').get_parameter_value().bool_value
         self.publish_tf = self.get_parameter('publish_tf').get_parameter_value().bool_value
+        self.use_ros_time = self.get_parameter('use_ros_time').get_parameter_value().bool_value
         relay_pipe = self.get_parameter('relay_pipe').get_parameter_value().string_value
         reset_flag = self.get_parameter('reset_flag').get_parameter_value().string_value
 
@@ -90,7 +92,7 @@ class UtlidarOdom(Node):
             f'{self.input_topic} -> {self.output_topic} '
             f'(frames {self.odom_frame} -> {self.base_frame}, '
             f'zero_at_start={self.zero_at_start}, publish_tf={self.publish_tf}, '
-            f'relay fifo {relay_pipe})'
+            f'use_ros_time={self.use_ros_time}, relay fifo {relay_pipe})'
         )
 
     def _pose_xyzyaw(self, msg: Odometry) -> tuple[float, float, float, float]:
@@ -152,6 +154,9 @@ class UtlidarOdom(Node):
     def _cb(self, msg: Odometry) -> None:
         self._n += 1
         out = self._relative(msg) if self.zero_at_start else self._passthrough(msg)
+        # Unitree lidar stamps lag the NX/camera clock (~minutes); TF lookup then fails.
+        if self.use_ros_time:
+            out.header.stamp = self.get_clock().now().to_msg()
         self._pub.publish(out)
         try:
             self._fifo.write(serialize_message(out))
