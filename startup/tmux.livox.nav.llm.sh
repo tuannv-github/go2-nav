@@ -12,8 +12,8 @@ tmux_stack_max_perf "$SCRIPT_DIR"
 tmux_stack_ensure_session "$SESSION" main "$TMUX_STACK_PROJECT_DIR"
 tmux_stack_ensure_four_panes "$SESSION" main "$TMUX_STACK_PROJECT_DIR"
 
-SETUP="cd $TMUX_STACK_PROJECT_DIR && source ./setup.sh"
-RS_SETUP="export CYCLONEDDS_URI=file://$TMUX_STACK_PROJECT_DIR/cyclonedds.realsense.xml"
+SETUP="cd $TMUX_STACK_PROJECT_DIR && source ./scripts/setup.sh"
+RS_SETUP="export CYCLONEDDS_URI=file://$TMUX_STACK_PROJECT_DIR/cyclonedds/cyclonedds.realsense.xml"
 
 tmux_stack_run_pane "$SESSION" main 0 "cd $SCRIPT_DIR && ./run_go2_controller.sh"
 tmux_stack_run_pane "$SESSION" main 1 "$SETUP && ros2 launch realsense_video_publisher video_publisher.launch.py"

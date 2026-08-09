@@ -4,7 +4,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 source "${SCRIPT_DIR}/install/setup.zsh"
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-export CYCLONEDDS_URI="${CYCLONEDDS_URI:-file://${SCRIPT_DIR}/cyclonedds.eth0.xml}"
+export CYCLONEDDS_URI="${CYCLONEDDS_URI:-file://${SCRIPT_DIR}/cyclonedds/cyclonedds.eth0.xml}"
 
 echo "CYCLONEDDS_URI=$CYCLONEDDS_URI"
 echo "ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}"

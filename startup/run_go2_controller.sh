@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Launch go2_controller (MQTT → /wirelesscontroller, relay /cmd_vel, mux → /cmd_vel_out).
-# Uses cyclonedds.go2.xml so DDS (including /wirelesscontroller) uses the configured interfaces (e.g. eth0).
+# Uses cyclonedds/cyclonedds.go2.xml so DDS (including /wirelesscontroller) uses the configured interfaces (e.g. eth0).
 # Do not use `set -u` here: colcon `install/setup.bash` uses unset vars (e.g. COLCON_TRACE).
 set -eo pipefail
 
@@ -19,6 +19,6 @@ else
 fi
 
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-export CYCLONEDDS_URI="file://${PROJECT_DIR}/cyclonedds.go2.xml"
+export CYCLONEDDS_URI="file://${PROJECT_DIR}/cyclonedds/cyclonedds.go2.xml"
 
 exec ros2 launch go2_controller go2_controller.launch.py "$@"

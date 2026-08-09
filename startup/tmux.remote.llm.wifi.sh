@@ -24,8 +24,8 @@ apply_wifi_routes
 tmux_stack_ensure_session "$SESSION" control "$TMUX_STACK_PROJECT_DIR"
 tmux_stack_ensure_four_panes "$SESSION" control "$TMUX_STACK_PROJECT_DIR"
 
-SETUP="cd $TMUX_STACK_PROJECT_DIR && source ./setup.sh"
-RS_SETUP="export CYCLONEDDS_URI=file://$TMUX_STACK_PROJECT_DIR/cyclonedds.realsense.xml"
+SETUP="cd $TMUX_STACK_PROJECT_DIR && source ./scripts/setup.sh"
+RS_SETUP="export CYCLONEDDS_URI=file://$TMUX_STACK_PROJECT_DIR/cyclonedds/cyclonedds.realsense.xml"
 
 tmux_stack_run_pane "$SESSION" control 0 "$SETUP && $RS_SETUP && ros2 launch go2_nav realsense.launch.py"
 tmux_stack_run_pane "$SESSION" control 1 "$SETUP && ros2 launch realsense_video_publisher video_publisher.launch.py"

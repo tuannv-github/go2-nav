@@ -13,7 +13,7 @@ Go2 controller bridge: single node publishing ``unitree_go/WirelessController`` 
   publish an all-zero ``WirelessController`` **once** (safe stop), then pause periodic output
   until new input arrives.
 
-The robot consumes ``/wirelesscontroller`` over DDS (e.g. eth0 via cyclonedds.go2.xml); there is no
+The robot consumes ``/wirelesscontroller`` over DDS (e.g. eth0 via cyclonedds/cyclonedds.go2.xml); there is no
 separate Twist mux or topic_tools relay.
 """
 
