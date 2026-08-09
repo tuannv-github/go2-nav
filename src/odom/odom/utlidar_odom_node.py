@@ -2,13 +2,14 @@
 """Subscribe to Unitree ``/utlidar/robot_odom`` and publish ROS default ``/odom``.
 
 Also broadcasts TF ``odom`` -> ``base_link`` (Go2 does not publish this TF).
-First pose is the local origin (same idea as ``scripts/utlidar_odom.py``);
-call service ``~/reset`` to re-zero at the current pose.
+First pose is the local origin (same idea as ``scripts/utlidar_odom.py``).
+Touch ``/tmp/go2_odom.reset`` or call ``/odom_ext_relay/reset`` to re-zero.
 """
 
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import rclpy
 from geometry_msgs.msg import TransformStamped
@@ -17,7 +18,6 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.serialization import serialize_message
-from std_srvs.srv import Empty
 from tf2_ros import TransformBroadcaster
 
 from odom.fifo_ipc import FifoWriter
@@ -61,6 +61,7 @@ class UtlidarOdom(Node):
         self.declare_parameter('zero_at_start', True)
         self.declare_parameter('publish_tf', True)
         self.declare_parameter('relay_pipe', '/tmp/go2_odom.fifo')
+        self.declare_parameter('reset_flag', '/tmp/go2_odom.reset')
 
         self.input_topic = self.get_parameter('input_topic').get_parameter_value().string_value
         self.output_topic = self.get_parameter('output_topic').get_parameter_value().string_value
@@ -69,15 +70,21 @@ class UtlidarOdom(Node):
         self.zero_at_start = self.get_parameter('zero_at_start').get_parameter_value().bool_value
         self.publish_tf = self.get_parameter('publish_tf').get_parameter_value().bool_value
         relay_pipe = self.get_parameter('relay_pipe').get_parameter_value().string_value
+        reset_flag = self.get_parameter('reset_flag').get_parameter_value().string_value
 
         self._origin: tuple[float, float, float, float] | None = None
         self._tf = TransformBroadcaster(self) if self.publish_tf else None
         self._fifo = FifoWriter(relay_pipe)
+        self._reset_flag = Path(reset_flag)
+        try:
+            self._reset_flag.unlink(missing_ok=True)
+        except OSError:
+            pass
 
         self._n = 0
         self._pub = self.create_publisher(Odometry, self.output_topic, _PUB_QOS)
         self.create_subscription(Odometry, self.input_topic, self._cb, _SUB_QOS)
-        self.create_service(Empty, 'reset', self._on_reset)
+        self.create_timer(0.05, self._poll_reset_flag)
 
         self.get_logger().info(
             f'{self.input_topic} -> {self.output_topic} '
@@ -90,10 +97,20 @@ class UtlidarOdom(Node):
         p = msg.pose.pose.position
         return (p.x, p.y, p.z, yaw_from_quat(msg.pose.pose.orientation))
 
-    def _on_reset(self, _req: Empty.Request, res: Empty.Response) -> Empty.Response:
+    def _clear_origin(self, via: str) -> None:
         self._origin = None
-        self.get_logger().info('origin cleared; next /utlidar/robot_odom sample becomes origin')
-        return res
+        self.get_logger().info(
+            f'origin cleared ({via}); next /utlidar/robot_odom sample becomes origin'
+        )
+
+    def _poll_reset_flag(self) -> None:
+        if not self._reset_flag.exists():
+            return
+        try:
+            self._reset_flag.unlink()
+        except OSError:
+            return
+        self._clear_origin(f'flag {self._reset_flag}')
 
     def _relative(self, msg: Odometry) -> Odometry:
         x, y, z, yaw = self._pose_xyzyaw(msg)

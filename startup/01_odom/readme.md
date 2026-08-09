@@ -86,11 +86,16 @@ Check the external bus from the robot:
 ~/go2-nav/startup/01_odom/echo_odom_ext.sh --field pose.pose
 ```
 
-Reset origin (next sample becomes zero):
+Reset origin (next sample becomes zero; onboard `/utlidar/robot_odom` unchanged):
 
 ```bash
-source ./scripts/setup.eth0.sh
-ros2 service call /utlidar_odom/reset std_srvs/srv/Empty
+~/go2-nav/startup/01_odom/reset_odom.sh
+```
+
+On the external FastDDS bus (e.g. roboticpc):
+
+```bash
+ros2 service call /odom_ext_relay/reset std_srvs/srv/Empty
 ```
 
 CLI monitor (does not publish `/odom`):

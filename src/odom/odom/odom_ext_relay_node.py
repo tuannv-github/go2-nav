@@ -7,6 +7,8 @@ into the same process as the external bus.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import rclpy
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
@@ -14,6 +16,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.serialization import deserialize_message
+from std_srvs.srv import Empty
 from tf2_ros import TransformBroadcaster
 
 from odom.fifo_ipc import FifoReader
@@ -33,18 +36,33 @@ class OdomExtRelay(Node):
         self.declare_parameter('output_topic', '/odom')
         self.declare_parameter('publish_tf', True)
         self.declare_parameter('relay_pipe', '/tmp/go2_odom.fifo')
+        self.declare_parameter('reset_flag', '/tmp/go2_odom.reset')
 
         topic = self.get_parameter('output_topic').get_parameter_value().string_value
         self.publish_tf = self.get_parameter('publish_tf').get_parameter_value().bool_value
         pipe = self.get_parameter('relay_pipe').get_parameter_value().string_value
+        reset_flag = self.get_parameter('reset_flag').get_parameter_value().string_value
 
         self._pub = self.create_publisher(Odometry, topic, _PUB_QOS)
         self._tf = TransformBroadcaster(self) if self.publish_tf else None
         self._n = 0
         self._fifo = FifoReader(pipe)
+        self._reset_flag = Path(reset_flag)
+        self.create_service(Empty, '~/reset', self._on_reset)
         self.create_timer(0.005, self._poll)
 
-        self.get_logger().info(f'ext /odom relay listening fifo {pipe} -> {topic}')
+        self.get_logger().info(
+            f'ext /odom relay listening fifo {pipe} -> {topic}; '
+            f'reset ~/reset -> {self._reset_flag}'
+        )
+
+    def _on_reset(self, _req: Empty.Request, res: Empty.Response) -> Empty.Response:
+        self._reset_flag.parent.mkdir(parents=True, exist_ok=True)
+        self._reset_flag.touch()
+        self.get_logger().info(
+            f'reset requested; touched {self._reset_flag} (utlidar_odom zeros next sample)'
+        )
+        return res
 
     def destroy_node(self) -> bool:
         self._fifo.close()
