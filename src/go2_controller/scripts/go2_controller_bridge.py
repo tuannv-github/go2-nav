@@ -18,18 +18,22 @@ import time
 
 import paho.mqtt.client as mqtt
 import rclpy
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from rclpy.action import ActionClient
+from rclpy.duration import Duration
 from rclpy.node import Node
+from tf2_ros import Buffer, TransformException, TransformListener
 from unitree_api.msg import Request
 from unitree_go.msg import WirelessController
 
 try:
     from nav2_msgs.action import NavigateToPose
+    from nav2_msgs.srv import ClearEntireCostmap
 
     _NAV2_AVAILABLE = True
 except ImportError:  # pragma: no cover - minimal controller-only installs
     NavigateToPose = None
+    ClearEntireCostmap = None
     _NAV2_AVAILABLE = False
 
 CMD_VEL_REPUBLISH_INTERVAL_S = 0.05
@@ -37,6 +41,10 @@ SPORT_API_ID_STOPMOVE = 1003
 SPORT_API_ID_MOVE = 1008
 SPORT_REQUEST_TOPIC = '/api/sport/request'
 NAV2_ACTION_NAME = 'navigate_to_pose'
+DEFAULT_POSE_FRAME = 'map'
+DEFAULT_BASE_FRAME = 'base_link'
+DEFAULT_INITIALPOSE_TOPIC = '/initialpose'
+DEFAULT_CLEAR_LOCAL_COSTMAP_SERVICE = '/local_costmap/clear_entirely_local_costmap'
 # vlaa app_go2 calib: stick/sport send = command * scale (same numbers both paths).
 # Yaw: vlaa GO2_MAX_YAW=2.094 → scale = 1/max (rx = wz * scale), not a max param.
 DEFAULT_CMD_VEL_SCALE_VX = 0.65
@@ -323,6 +331,48 @@ _REST_OPENAPI_SPEC = {
                 'responses': _OK_RESPONSE,
             }
         },
+        '/nav2/pose': {
+            'get': {
+                'tags': ['nav2'],
+                'summary': 'Get current robot pose (TF map→base_link)',
+                'responses': _OK_RESPONSE,
+            },
+            'post': {
+                'tags': ['nav2'],
+                'summary': 'Set localization pose via /initialpose',
+                'requestBody': {
+                    'required': True,
+                    'content': {
+                        'application/json': {
+                            'schema': {
+                                'type': 'object',
+                                'required': ['x', 'y'],
+                                'properties': {
+                                    'x': {'type': 'number'},
+                                    'y': {'type': 'number'},
+                                    'yaw': {'type': 'number', 'default': 0.0},
+                                    'frame_id': {'type': 'string', 'default': 'map'},
+                                },
+                            },
+                            'example': {
+                                'x': -0.05047607421875,
+                                'y': 2.0018317699432373,
+                                'yaw': -0.5609602627,
+                                'frame_id': 'map',
+                            },
+                        }
+                    },
+                },
+                'responses': _OK_RESPONSE,
+            },
+        },
+        '/nav2/clear_local_costmap': {
+            'post': {
+                'tags': ['nav2'],
+                'summary': 'Clear the entire local costmap',
+                'responses': _OK_RESPONSE,
+            }
+        },
     },
 }
 
@@ -414,6 +464,12 @@ class Go2ControllerBridge(Node):
         self.declare_parameter('cmd_vel_scale_vx', DEFAULT_CMD_VEL_SCALE_VX)
         self.declare_parameter('cmd_vel_scale_vy', DEFAULT_CMD_VEL_SCALE_VY)
         self.declare_parameter('cmd_vel_scale_w', DEFAULT_CMD_VEL_SCALE_W)
+        self.declare_parameter('pose_frame', DEFAULT_POSE_FRAME)
+        self.declare_parameter('base_frame', DEFAULT_BASE_FRAME)
+        self.declare_parameter('initialpose_topic', DEFAULT_INITIALPOSE_TOPIC)
+        self.declare_parameter(
+            'clear_local_costmap_service', DEFAULT_CLEAR_LOCAL_COSTMAP_SERVICE
+        )
 
         # ROS I/O
         self.declare_parameter('ros2_topic', '/wirelesscontroller')
@@ -457,6 +513,14 @@ class Go2ControllerBridge(Node):
         self._cmd_vel_scale_w = self.get_parameter(
             'cmd_vel_scale_w'
         ).get_parameter_value().double_value
+        self._pose_frame = self.get_parameter('pose_frame').get_parameter_value().string_value
+        self._base_frame = self.get_parameter('base_frame').get_parameter_value().string_value
+        self._initialpose_topic = self.get_parameter(
+            'initialpose_topic'
+        ).get_parameter_value().string_value
+        self._clear_local_costmap_service = self.get_parameter(
+            'clear_local_costmap_service'
+        ).get_parameter_value().string_value
         self._calib_lock = threading.Lock()
 
         self._last_mqtt_time = None
@@ -481,9 +545,18 @@ class Go2ControllerBridge(Node):
             ActionClient(self, NavigateToPose, NAV2_ACTION_NAME)
             if _NAV2_AVAILABLE else None
         )
+        self._clear_local_costmap_client = (
+            self.create_client(ClearEntireCostmap, self._clear_local_costmap_service)
+            if _NAV2_AVAILABLE else None
+        )
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self)
 
         self.publisher_ = self.create_publisher(WirelessController, self._out_topic, 10)
         self._sport_pub = self.create_publisher(Request, SPORT_REQUEST_TOPIC, 10)
+        self._initialpose_pub = self.create_publisher(
+            PoseWithCovarianceStamped, self._initialpose_topic, 10
+        )
         self._sport_req_seq = 0
         self.create_subscription(Twist, self._cmd_vel_topic, self._on_cmd_vel, 10)
 
@@ -958,6 +1031,120 @@ class Go2ControllerBridge(Node):
             self._nav2_goal_token += 1
         return 200, {'ok': True, 'status': 'canceling'}
 
+    @staticmethod
+    def _yaw_from_quat(z: float, w: float) -> float:
+        return 2.0 * math.atan2(float(z), float(w))
+
+    @staticmethod
+    def _quat_from_yaw(yaw: float) -> tuple[float, float, float, float]:
+        half = 0.5 * float(yaw)
+        return 0.0, 0.0, math.sin(half), math.cos(half)
+
+    def _nav2_get_pose(self) -> tuple[int, dict]:
+        try:
+            tf = self._tf_buffer.lookup_transform(
+                self._pose_frame,
+                self._base_frame,
+                rclpy.time.Time(),
+                timeout=Duration(seconds=0.5),
+            )
+        except TransformException as exc:
+            return 503, {
+                'detail': (
+                    f'TF unavailable ({self._pose_frame} → {self._base_frame}): {exc}'
+                ),
+            }
+        t = tf.transform.translation
+        q = tf.transform.rotation
+        yaw = self._yaw_from_quat(q.z, q.w)
+        return 200, {
+            'ok': True,
+            'frame_id': self._pose_frame,
+            'base_frame': self._base_frame,
+            'x': float(t.x),
+            'y': float(t.y),
+            'z': float(t.z),
+            'yaw': float(yaw),
+            'orientation': {
+                'x': float(q.x),
+                'y': float(q.y),
+                'z': float(q.z),
+                'w': float(q.w),
+            },
+        }
+
+    def _nav2_set_pose(self, body) -> tuple[int, dict]:
+        if not isinstance(body, dict):
+            return 422, {'detail': 'Body must be a JSON object'}
+        try:
+            x = float(body['x'])
+            y = float(body['y'])
+            yaw = float(body.get('yaw', 0.0))
+            frame_id = str(body.get('frame_id', self._pose_frame) or self._pose_frame)
+        except (KeyError, TypeError, ValueError) as exc:
+            return 400, {'detail': f'Invalid pose: {exc}'}
+
+        msg = PoseWithCovarianceStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = frame_id
+        msg.pose.pose.position.x = x
+        msg.pose.pose.position.y = y
+        msg.pose.pose.position.z = 0.0
+        qx, qy, qz, qw = self._quat_from_yaw(yaw)
+        msg.pose.pose.orientation.x = qx
+        msg.pose.pose.orientation.y = qy
+        msg.pose.pose.orientation.z = qz
+        msg.pose.pose.orientation.w = qw
+        # Modest XY/yaw covariance so RTAB-Map/AMCL accepts the estimate.
+        msg.pose.covariance[0] = 0.25
+        msg.pose.covariance[7] = 0.25
+        msg.pose.covariance[35] = 0.06853891945200942  # (15 deg)^2
+
+        self._initialpose_pub.publish(msg)
+        if self._log_each_rest:
+            self.get_logger().info(
+                f'io input type=rest topic=POST /nav2/pose | '
+                f'output type=geometry_msgs/PoseWithCovarianceStamped '
+                f'topic={self._initialpose_topic} '
+                f'x={x:.3f} y={y:.3f} yaw={yaw:.3f} frame_id={frame_id}'
+            )
+        return 200, {
+            'ok': True,
+            'topic': self._initialpose_topic,
+            'pose': {'x': x, 'y': y, 'yaw': yaw, 'frame_id': frame_id},
+        }
+
+    def _nav2_clear_local_costmap(self) -> tuple[int, dict]:
+        if not _NAV2_AVAILABLE or self._clear_local_costmap_client is None:
+            return 503, {'detail': 'nav2_msgs/ClearEntireCostmap is not available'}
+        if not self._clear_local_costmap_client.wait_for_service(timeout_sec=1.0):
+            return 503, {
+                'detail': (
+                    f'Clear local costmap service unavailable: '
+                    f'{self._clear_local_costmap_service}'
+                ),
+            }
+        future = self._clear_local_costmap_client.call_async(ClearEntireCostmap.Request())
+        deadline = time.time() + 2.0
+        while rclpy.ok() and not future.done() and time.time() < deadline:
+            time.sleep(0.02)
+        if not future.done():
+            return 504, {'detail': 'Timed out clearing local costmap'}
+        try:
+            future.result()
+        except Exception as exc:
+            return 500, {'detail': f'Clear local costmap failed: {exc}'}
+        if self._log_each_rest:
+            self.get_logger().info(
+                f'io input type=rest topic=POST /nav2/clear_local_costmap | '
+                f'cleared service={self._clear_local_costmap_service}'
+            )
+        return 200, {
+            'ok': True,
+            'service': self._clear_local_costmap_service,
+            'message': 'local costmap cleared',
+        }
+
     def _start_rest_server(self) -> None:
         bridge = self
 
@@ -1058,6 +1245,22 @@ class Go2ControllerBridge(Node):
             code, payload = await run_in_threadpool(bridge._nav2_cancel)
             return JSONResponse(payload, status_code=code)
 
+        async def nav2_pose_get(_request):
+            code, payload = await run_in_threadpool(bridge._nav2_get_pose)
+            return JSONResponse(payload, status_code=code)
+
+        async def nav2_pose_post(request):
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse({'detail': 'Invalid JSON'}, status_code=400)
+            code, payload = await run_in_threadpool(bridge._nav2_set_pose, body)
+            return JSONResponse(payload, status_code=code)
+
+        async def nav2_clear_local_costmap(_request):
+            code, payload = await run_in_threadpool(bridge._nav2_clear_local_costmap)
+            return JSONResponse(payload, status_code=code)
+
         app = Starlette(
             routes=[
                 Route('/openapi.json', openapi_json, methods=['GET']),
@@ -1075,6 +1278,13 @@ class Go2ControllerBridge(Node):
                 Route('/nav2/goal', nav2_goal_get, methods=['GET']),
                 Route('/nav2/goal', nav2_goal, methods=['POST']),
                 Route('/nav2/cancel', nav2_cancel, methods=['POST']),
+                Route('/nav2/pose', nav2_pose_get, methods=['GET']),
+                Route('/nav2/pose', nav2_pose_post, methods=['POST']),
+                Route(
+                    '/nav2/clear_local_costmap',
+                    nav2_clear_local_costmap,
+                    methods=['POST'],
+                ),
             ],
         )
 

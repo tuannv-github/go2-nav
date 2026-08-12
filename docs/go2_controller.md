@@ -122,6 +122,9 @@ Bind: `rest_host` / `rest_port` (default `0.0.0.0:8081`).
 | `GET` | `/nav2/goal` | Current Nav2 goal payload and status. |
 | `POST` | `/nav2/goal` | Send `{x, y, yaw, frame_id}` to Nav2 `NavigateToPose`. |
 | `POST` | `/nav2/cancel` | Cancel the active Nav2 goal. |
+| `GET` | `/nav2/pose` | Current robot pose from TF (`map` → `base_link`). |
+| `POST` | `/nav2/pose` | Set localization pose via `/initialpose`. |
+| `POST` | `/nav2/clear_local_costmap` | Clear the entire local costmap. |
 | `GET` | `/docs` | Swagger UI. |
 | `GET` | `/openapi.json` | OpenAPI 3 schema. |
 
@@ -130,6 +133,10 @@ dropped while REST (or MQTT) is active.
 
 The Swagger example for `POST /nav2/goal` targets the configured `main door`
 pose from `app_go2/destinations.yaml`.
+
+```bash
+curl -s -X POST http://127.0.0.1:8081/nav2/clear_local_costmap
+```
 
 ### `POST /wireless`
 
