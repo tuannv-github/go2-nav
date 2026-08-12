@@ -32,6 +32,8 @@ VLAA_APP_ROBOTS="${VLAA_APP_ROBOTS:-$HOME/vlaa/app_robots}"
 VLAA_PULSE_CARD_PATTERNS="${VLAA_PULSE_CARD_PATTERNS:-Blink500B2|10d6_4803|USB_Composite|0909_005b}"
 VLAA_AUDIO_NICE="${VLAA_AUDIO_NICE:--20}"
 VLAA_AUDIO_RT_PRIO="${VLAA_AUDIO_RT_PRIO:-80}"
+VLAA_USE_UDP_LOG="${VLAA_USE_UDP_LOG:-1}"
+export VLAA_USE_UDP_LOG
 USER_SLICE_RT_RUNTIME=/sys/fs/cgroup/cpu,cpuacct/user.slice/cpu.rt_runtime_us
 export VLAA_AUDIO_NICE VLAA_AUDIO_RT_PRIO
 
@@ -115,7 +117,7 @@ run_setup_audio_priority || true
 enable_user_slice_rt || true
 apply_shell_nice
 verify_sched_fifo || true
-run_routes || true
+# Routes are managed by the surrounding tmux/network startup scripts.
 
 list_target_cards() {
     pactl list short cards 2>/dev/null \
