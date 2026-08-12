@@ -118,11 +118,18 @@ Bind: `rest_host` / `rest_port` (default `0.0.0.0:8081`).
 | `POST` | `/calib/vy/{scale}` | Set lateral scale. |
 | `POST` | `/calib/w/{scale}` | Set yaw scale. |
 | `GET` | `/health` | Liveness. |
+| `GET` | `/nav2/status` | Current Nav2 goal, feedback, and result. |
+| `GET` | `/nav2/goal` | Current Nav2 goal payload and status. |
+| `POST` | `/nav2/goal` | Send `{x, y, yaw, frame_id}` to Nav2 `NavigateToPose`. |
+| `POST` | `/nav2/cancel` | Cancel the active Nav2 goal. |
 | `GET` | `/docs` | Swagger UI. |
 | `GET` | `/openapi.json` | OpenAPI 3 schema. |
 
 MQTT is lower priority, so REST is not 409-blocked by MQTT. Nav `/cmd_vel` is
 dropped while REST (or MQTT) is active.
+
+The Swagger example for `POST /nav2/goal` targets the configured `main door`
+pose from `app_go2/destinations.yaml`.
 
 ### `POST /wireless`
 

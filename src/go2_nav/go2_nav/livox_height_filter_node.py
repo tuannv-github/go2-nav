@@ -56,7 +56,7 @@ class LivoxHeightFilter(Node):
         # Floor lobe in base_link is about -0.20..0.00 m while standing.
         self.declare_parameter('min_z', 0.05)
         self.declare_parameter('max_z', 0.50)
-        self.declare_parameter('min_range', 0.45)
+        self.declare_parameter('min_range', 0.15)
 
         self.input_topic = self.get_parameter('input_topic').get_parameter_value().string_value
         self.output_topic = self.get_parameter('output_topic').get_parameter_value().string_value

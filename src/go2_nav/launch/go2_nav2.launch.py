@@ -148,7 +148,7 @@ def generate_launch_description():
                 # odom z: base_link is ~0.27 m and the floor sits at ~0.12–0.20 m.
                 'min_z': 0.05,
                 'max_z': 0.50,
-                'min_range': 0.45,
+                'min_range': 0.15,
             }],
         ),
         Node(

@@ -18,15 +18,25 @@ import time
 
 import paho.mqtt.client as mqtt
 import rclpy
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import PoseStamped, Twist
+from rclpy.action import ActionClient
 from rclpy.node import Node
 from unitree_api.msg import Request
 from unitree_go.msg import WirelessController
+
+try:
+    from nav2_msgs.action import NavigateToPose
+
+    _NAV2_AVAILABLE = True
+except ImportError:  # pragma: no cover - minimal controller-only installs
+    NavigateToPose = None
+    _NAV2_AVAILABLE = False
 
 CMD_VEL_REPUBLISH_INTERVAL_S = 0.05
 SPORT_API_ID_STOPMOVE = 1003
 SPORT_API_ID_MOVE = 1008
 SPORT_REQUEST_TOPIC = '/api/sport/request'
+NAV2_ACTION_NAME = 'navigate_to_pose'
 # vlaa app_go2 calib: stick/sport send = command * scale (same numbers both paths).
 # Yaw: vlaa GO2_MAX_YAW=2.094 → scale = 1/max (rx = wz * scale), not a max param.
 DEFAULT_CMD_VEL_SCALE_VX = 0.65
@@ -120,6 +130,7 @@ _REST_OPENAPI_SPEC = {
         {'name': 'cmd_vel'},
         {'name': 'calib'},
         {'name': 'meta'},
+        {'name': 'nav2'},
     ],
     'paths': {
         '/wireless': {
@@ -261,6 +272,55 @@ _REST_OPENAPI_SPEC = {
                         },
                     },
                 },
+            }
+        },
+        '/nav2/status': {
+            'get': {
+                'tags': ['nav2'],
+                'summary': 'Get Nav2 NavigateToPose status',
+                'responses': _OK_RESPONSE,
+            }
+        },
+        '/nav2/goal': {
+            'get': {
+                'tags': ['nav2'],
+                'summary': 'Get the current Nav2 goal and status',
+                'responses': _OK_RESPONSE,
+            },
+            'post': {
+                'tags': ['nav2'],
+                'summary': 'Send a goal to Nav2 NavigateToPose (replaces any active goal)',
+                'requestBody': {
+                    'required': True,
+                    'content': {
+                        'application/json': {
+                            'schema': {
+                                'type': 'object',
+                                'required': ['x', 'y'],
+                                'properties': {
+                                    'x': {'type': 'number'},
+                                    'y': {'type': 'number'},
+                                    'yaw': {'type': 'number', 'default': 0.0},
+                                    'frame_id': {'type': 'string', 'default': 'map'},
+                                },
+                            },
+                            'example': {
+                                'x': -0.05047607421875,
+                                'y': 2.0018317699432373,
+                                'yaw': -0.5609602627,
+                                'frame_id': 'map',
+                            },
+                        }
+                    },
+                },
+                'responses': _OK_RESPONSE,
+            }
+        },
+        '/nav2/cancel': {
+            'post': {
+                'tags': ['nav2'],
+                'summary': 'Cancel the active Nav2 goal',
+                'responses': _OK_RESPONSE,
             }
         },
     },
@@ -410,6 +470,17 @@ class Go2ControllerBridge(Node):
         self._move_lock = threading.Lock()
         self._move_stop = threading.Event()
         self._move_thread = None
+        self._nav2_lock = threading.Lock()
+        self._nav2_goal_handle = None
+        self._nav2_goal_payload = None
+        self._nav2_feedback = {}
+        self._nav2_status = 'idle'
+        self._nav2_result = None
+        self._nav2_goal_token = 0
+        self._nav2_action_client = (
+            ActionClient(self, NavigateToPose, NAV2_ACTION_NAME)
+            if _NAV2_AVAILABLE else None
+        )
 
         self.publisher_ = self.create_publisher(WirelessController, self._out_topic, 10)
         self._sport_pub = self.create_publisher(Request, SPORT_REQUEST_TOPIC, 10)
@@ -739,6 +810,154 @@ class Go2ControllerBridge(Node):
             self._sport_stop_move(log=True)
         return 200, {'ok': True, 'message': 'stopped', 'backend': 'sport_move'}
 
+    def _nav2_snapshot(self) -> dict:
+        with self._nav2_lock:
+            return {
+                'ok': _NAV2_AVAILABLE,
+                'action': NAV2_ACTION_NAME,
+                'status': self._nav2_status,
+                'goal': self._nav2_goal_payload,
+                'feedback': dict(self._nav2_feedback),
+                'result': self._nav2_result,
+            }
+
+    def _on_nav2_feedback(self, feedback_msg) -> None:
+        feedback = feedback_msg.feedback
+        current_pose = feedback.current_pose
+        with self._nav2_lock:
+            self._nav2_feedback = {
+                'current_pose': {
+                    'frame_id': current_pose.header.frame_id,
+                    'x': current_pose.pose.position.x,
+                    'y': current_pose.pose.position.y,
+                },
+                'distance_remaining': feedback.distance_remaining,
+                'number_of_recoveries': feedback.number_of_recoveries,
+            }
+
+    def _on_nav2_goal_response(self, future, goal_token: int) -> None:
+        try:
+            goal_handle = future.result()
+        except Exception as exc:
+            with self._nav2_lock:
+                if goal_token != self._nav2_goal_token:
+                    return
+                self._nav2_status = 'error'
+                self._nav2_result = {'message': str(exc)}
+            return
+        with self._nav2_lock:
+            if goal_token != self._nav2_goal_token:
+                # A newer goal replaced this one; cancel the stale handle.
+                if goal_handle is not None and goal_handle.accepted:
+                    goal_handle.cancel_goal_async()
+                return
+            if not goal_handle.accepted:
+                self._nav2_status = 'rejected'
+                self._nav2_result = {'message': 'Nav2 rejected the goal'}
+                return
+            cancel_requested = self._nav2_status == 'canceling'
+            self._nav2_goal_handle = goal_handle
+            self._nav2_status = 'canceling' if cancel_requested else 'executing'
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(
+            lambda f, token=goal_token: self._on_nav2_result(f, token)
+        )
+        if cancel_requested:
+            goal_handle.cancel_goal_async()
+
+    def _on_nav2_result(self, future, goal_token: int) -> None:
+        try:
+            result = future.result()
+            status = int(result.status)
+            result_code = 0
+            message = 'Nav2 action completed'
+        except Exception as exc:
+            status = -1
+            result_code = -1
+            message = str(exc)
+        status_names = {
+            4: 'succeeded',
+            5: 'canceled',
+            6: 'aborted',
+        }
+        with self._nav2_lock:
+            if goal_token != self._nav2_goal_token:
+                return
+            self._nav2_status = status_names.get(status, 'finished')
+            self._nav2_result = {
+                'status_code': status,
+                'error_code': result_code,
+                'message': message,
+            }
+            self._nav2_goal_handle = None
+
+    def _nav2_cancel_active_locked(self) -> None:
+        """Caller holds ``_nav2_lock``. Cancel current Nav2 goal if any."""
+        goal_handle = self._nav2_goal_handle
+        if self._nav2_status in ('waiting', 'executing', 'canceling'):
+            self._nav2_status = 'canceling'
+        self._nav2_goal_handle = None
+        if goal_handle is not None:
+            try:
+                goal_handle.cancel_goal_async()
+            except Exception:
+                pass
+
+    def _nav2_send_goal(self, body) -> tuple[int, dict]:
+        if not _NAV2_AVAILABLE or self._nav2_action_client is None:
+            return 503, {'detail': 'nav2_msgs/NavigateToPose is not available'}
+        if not isinstance(body, dict):
+            return 422, {'detail': 'Body must be a JSON object'}
+        try:
+            x = float(body['x'])
+            y = float(body['y'])
+            yaw = float(body.get('yaw', 0.0))
+            frame_id = str(body.get('frame_id', 'map'))
+        except (KeyError, TypeError, ValueError) as exc:
+            return 400, {'detail': f'Invalid goal: {exc}'}
+        if not self._nav2_action_client.wait_for_server(timeout_sec=0.5):
+            return 503, {'detail': f'Nav2 action server unavailable: {NAV2_ACTION_NAME}'}
+
+        goal = NavigateToPose.Goal()
+        goal.pose = PoseStamped()
+        goal.pose.header.stamp = self.get_clock().now().to_msg()
+        goal.pose.header.frame_id = frame_id
+        goal.pose.pose.position.x = x
+        goal.pose.pose.position.y = y
+        goal.pose.pose.orientation.z = math.sin(yaw / 2.0)
+        goal.pose.pose.orientation.w = math.cos(yaw / 2.0)
+        payload = {'x': x, 'y': y, 'yaw': yaw, 'frame_id': frame_id}
+        with self._nav2_lock:
+            replaced = self._nav2_status in ('waiting', 'executing', 'canceling')
+            self._nav2_cancel_active_locked()
+            self._nav2_goal_token += 1
+            goal_token = self._nav2_goal_token
+            self._nav2_goal_payload = payload
+            self._nav2_feedback = {}
+            self._nav2_result = None
+            self._nav2_status = 'waiting'
+        send_future = self._nav2_action_client.send_goal_async(
+            goal, feedback_callback=self._on_nav2_feedback
+        )
+        send_future.add_done_callback(
+            lambda f, token=goal_token: self._on_nav2_goal_response(f, token)
+        )
+        return 200, {
+            'ok': True,
+            'status': 'waiting',
+            'replaced': replaced,
+            'goal': payload,
+        }
+
+    def _nav2_cancel(self) -> tuple[int, dict]:
+        with self._nav2_lock:
+            active = self._nav2_status in ('waiting', 'executing', 'canceling')
+            if not active:
+                return 404, {'detail': 'No active Nav2 goal'}
+            self._nav2_cancel_active_locked()
+            self._nav2_goal_token += 1
+        return 200, {'ok': True, 'status': 'canceling'}
+
     def _start_rest_server(self) -> None:
         bridge = self
 
@@ -821,6 +1040,24 @@ class Go2ControllerBridge(Node):
             code, payload = await run_in_threadpool(bridge._rest_cmd_vel_stop)
             return JSONResponse(payload, status_code=code)
 
+        async def nav2_status(_request):
+            return JSONResponse(bridge._nav2_snapshot())
+
+        async def nav2_goal_get(_request):
+            return JSONResponse(bridge._nav2_snapshot())
+
+        async def nav2_goal(request):
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse({'detail': 'Invalid JSON'}, status_code=400)
+            code, payload = await run_in_threadpool(bridge._nav2_send_goal, body)
+            return JSONResponse(payload, status_code=code)
+
+        async def nav2_cancel(_request):
+            code, payload = await run_in_threadpool(bridge._nav2_cancel)
+            return JSONResponse(payload, status_code=code)
+
         app = Starlette(
             routes=[
                 Route('/openapi.json', openapi_json, methods=['GET']),
@@ -834,6 +1071,10 @@ class Go2ControllerBridge(Node):
                 Route('/wireless', wireless_post, methods=['POST']),
                 Route('/cmd_vel', cmd_vel_post, methods=['POST']),
                 Route('/cmd_vel/stop', cmd_vel_stop_post, methods=['POST']),
+                Route('/nav2/status', nav2_status, methods=['GET']),
+                Route('/nav2/goal', nav2_goal_get, methods=['GET']),
+                Route('/nav2/goal', nav2_goal, methods=['POST']),
+                Route('/nav2/cancel', nav2_cancel, methods=['POST']),
             ],
         )
 
