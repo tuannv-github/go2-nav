@@ -106,6 +106,10 @@ def launch_setup(context, *args, **kwargs):
         'use_action_for_goal': True,
         'wait_imu_to_init': wait_imu_to_init,
         'wait_for_transform': 0.5,
+        # Interpolate /odom to the sensor stamp. Without this, a 2–3 s loc
+        # cycle publishes map→odom from the latest odom and the pose jumps
+        # by however far the dog moved during that delay.
+        'odom_sensor_sync': True,
         'database_path': database_path,
         'Grid/DepthDecimation': '1',
         'Grid/RangeMax': '20',
@@ -143,9 +147,12 @@ def launch_setup(context, *args, **kwargs):
         'subscribe_scan_cloud': enable_livox_cloud,
         'scan_cloud_is_2d': False,
         'subscribe_odom_info': False,
-        # Localization: stay under ~0.5 s/update so corrections are not stale.
-        # utlidar odom covariance is tiny → OptimizeMaxError=3 rejected real ~0.3 m
-        # loop closures (ratio ~9). 0 disables that reject. Variance* loosens odom edges.
+        'approx_sync_max_interval': 0.15,
+        # Fast-motion loc: Vis+ICP was rejecting every loop (0/12 inliers, blur)
+        # and taking 2–3 s/update so pose rode stale odom. Livox ICP for the
+        # transform; RGB-D only for place recognition. Keep cycle <0.5 s.
+        # utlidar odom covariance is tiny → OptimizeMaxError=3 rejected real
+        # ~0.3 m corrections. 0 disables that reject. Variance* loosens odom edges.
         'Rtabmap/DetectionRate': '1',
         'Rtabmap/TimeThr': '0',
         'Rtabmap/LoopThr': '0.11',
@@ -157,28 +164,32 @@ def launch_setup(context, *args, **kwargs):
         'RGBD/ProximityBySpace': 'true',
         'RGBD/ProximityByTime': 'false',
         'RGBD/ProximityMaxGraphDepth': '0',
-        'RGBD/ProximityPathFilteringRadius': '2.0',
-        'RGBD/ProximityMaxPaths': '5',
-        'RGBD/ProximityAngle': '60',
-        'RGBD/LoopClosureReextractFeatures': 'true',
+        'RGBD/ProximityPathFilteringRadius': '4.0',
+        'RGBD/ProximityMaxPaths': '3',
+        'RGBD/ProximityAngle': '90',
+        'RGBD/ProximityOdomGuess': 'true',
+        'RGBD/LoopClosureReextractFeatures': 'false',
         'RGBD/LocalRadius': '15',
-        'RGBD/MaxLocalRetrieved': '4',
-        'Kp/MaxFeatures': '600',
+        'RGBD/MaxLocalRetrieved': '2',
+        'RGBD/MaxOdomCacheSize': '3',
+        'Kp/MaxFeatures': '400',
         'Kp/NndrRatio': '0.8',
         'GFTT/MinDistance': '5',
-        'Vis/MinInliers': '12',
+        'Vis/MinInliers': '8',
         'Vis/CorNNDR': '0.8',
-        'Vis/CorGuessWinSize': '20',
-        'Mem/STMSize': '15',
+        'Vis/CorGuessWinSize': '0',
+        'Mem/STMSize': '10',
         # Scan-to-scan refine warps the odom chain and fights map LC; proximity is enough.
         'RGBD/NeighborLinkRefining': 'false',
-        'RGBD/ProximityPathMaxNeighbors': '5' if enable_livox_cloud else '0',
-        'Reg/Strategy': '2' if enable_livox_cloud else '0',
-        'Icp/Iterations': '20',
-        'Icp/MaxCorrespondenceDistance': '1.0',
-        'Icp/MaxTranslation': '3.0',
-        'Icp/MaxRotation': '2.0',
-        'Icp/VoxelSize': '0.1',
+        'RGBD/ProximityPathMaxNeighbors': '2' if enable_livox_cloud else '0',
+        # 1=ICP (Livox). 2=Vis+ICP fails at speed (0 visual inliers). 0=visual.
+        'Reg/Strategy': '1' if enable_livox_cloud else '0',
+        'Icp/Iterations': '15',
+        'Icp/MaxCorrespondenceDistance': '1.5',
+        'Icp/MaxTranslation': '2.0',
+        'Icp/MaxRotation': '1.2',
+        'Icp/VoxelSize': '0.12',
+        'Icp/RangeMin': '0.5',
     }
 
     imu_topic = '/input/imu/filtered' if filter_imu_enabled else '/input/imu'
