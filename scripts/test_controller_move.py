@@ -25,9 +25,9 @@ import time
 import urllib.request
 
 # Match go2_controller_bridge / vlaa calib (invert_cmd_vel_lateral default True).
-CMD_VEL_SCALE_VX = 0.65
-CMD_VEL_SCALE_VY = 1.65
-CMD_VEL_SCALE_W = 1.0 / 2.094  # vlaa GO2_MAX_YAW → scale = 1/max
+CMD_VEL_SCALE_VX = 0.85
+CMD_VEL_SCALE_VY = 1.25
+CMD_VEL_SCALE_W = 1.25
 INVERT_LATERAL = True
 
 ACTIONS = (

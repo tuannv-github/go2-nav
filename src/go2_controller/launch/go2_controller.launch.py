@@ -42,9 +42,9 @@ def generate_launch_description():
         DeclareLaunchArgument('rest_host', default_value='0.0.0.0'),
         DeclareLaunchArgument('rest_port', default_value='8081'),
         DeclareLaunchArgument('log_each_rest_request', default_value='true'),
-        DeclareLaunchArgument('cmd_vel_scale_vx', default_value='0.65'),
-        DeclareLaunchArgument('cmd_vel_scale_vy', default_value='1.65'),
-        DeclareLaunchArgument('cmd_vel_scale_w', default_value='0.47755'),
+        DeclareLaunchArgument('cmd_vel_scale_vx', default_value='0.85'),
+        DeclareLaunchArgument('cmd_vel_scale_vy', default_value='1.25'),
+        DeclareLaunchArgument('cmd_vel_scale_w', default_value='1.25'),
 
         Node(
             package='go2_controller',

@@ -46,10 +46,9 @@ DEFAULT_BASE_FRAME = 'base_link'
 DEFAULT_INITIALPOSE_TOPIC = '/initialpose'
 DEFAULT_CLEAR_LOCAL_COSTMAP_SERVICE = '/local_costmap/clear_entirely_local_costmap'
 # vlaa app_go2 calib: stick/sport send = command * scale (same numbers both paths).
-# Yaw: vlaa GO2_MAX_YAW=2.094 → scale = 1/max (rx = wz * scale), not a max param.
-DEFAULT_CMD_VEL_SCALE_VX = 0.65
-DEFAULT_CMD_VEL_SCALE_VY = 1.65
-DEFAULT_CMD_VEL_SCALE_W = 1.0 / 2.094
+DEFAULT_CMD_VEL_SCALE_VX = 0.85
+DEFAULT_CMD_VEL_SCALE_VY = 1.25
+DEFAULT_CMD_VEL_SCALE_W = 1.25
 
 try:
     import uvicorn
@@ -1478,7 +1477,7 @@ class Go2ControllerBridge(Node):
             self._periodic_stop_sent = False
 
     def _twist_to_wireless(self, t: Twist) -> WirelessController:
-        # ly = vx * scale_vx, lx = vy * scale_vy, rx = wz * scale_w (w = 1/2.094).
+        # ly = vx * scale_vx, lx = vy * scale_vy, rx = wz * scale_w.
         vx = float(t.linear.x)
         vy = float(-t.linear.y) if self._invert_lateral else float(t.linear.y)
         wz = float(-t.angular.z)

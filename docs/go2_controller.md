@@ -163,10 +163,10 @@ non-expired command at `publish_rate` until `mqtt_timeout_sec` of silence.
 
 ### `POST /cmd_vel` (sport Move)
 
-SI command, then `send = command × scale`. Defaults: **vx×0.65**, **vy×1.65**, **w×(1/2.094)**.
+SI command, then `send = command × scale`. Defaults: **vx×0.85**, **vy×1.25**, **w×1.25**.
 
 ```bash
-# 0.2 m/s × 0.65 → 0.13 m/s for 5 s, then StopMove
+# 0.2 m/s × 0.85 → 0.17 m/s for 5 s, then StopMove
 curl -s -X POST http://127.0.0.1:8081/cmd_vel \
   -H 'Content-Type: application/json' \
   -d '{"vx":0.2,"vy":0.0,"w":0.0,"duration":5.0}'
@@ -185,17 +185,17 @@ curl -s -X POST http://127.0.0.1:8081/cmd_vel/stop
 
 ```bash
 curl -s http://127.0.0.1:8081/calib
-curl -s -X POST http://127.0.0.1:8081/calib/vx/0.65
+curl -s -X POST http://127.0.0.1:8081/calib/vx/0.85
 curl -s -X POST http://127.0.0.1:8081/calib \
   -H 'Content-Type: application/json' \
-  -d '{"vx":0.65,"vy":1.65,"w":0.47755}'
+  -d '{"vx":0.85,"vy":1.25,"w":1.25}'
 ```
 
 Launch-time overrides (no HTTP):
 
 ```bash
 ros2 launch go2_controller go2_controller.launch.py \
-  cmd_vel_scale_vx:=0.65 cmd_vel_scale_vy:=1.65 cmd_vel_scale_w:=0.47755
+  cmd_vel_scale_vx:=0.85 cmd_vel_scale_vy:=1.25 cmd_vel_scale_w:=1.25
 ```
 
 ## MQTT (optional, lower priority)
@@ -213,13 +213,13 @@ zeros will take over 1 s after the last REST call.
 
 Lowest priority. Twist (SI) → sticks uses the same vlaa calib as REST sport Move:
 
-`stick = si × scale` (no clamp) with defaults **vx×0.65**, **vy×1.65**, **w×(1/2.094)**.
+`stick = si × scale` (no clamp) with defaults **vx×0.85**, **vy×1.25**, **w×1.25**.
 
 | Twist | Stick | Default |
 |-------|--------|---------|
-| `linear.x` | `ly = vx × scale_vx` | ×0.65 |
-| `linear.y` | `lx = ±vy × scale_vy` | ×1.65; sign flip if `invert_cmd_vel_lateral` |
-| `angular.z` | `rx = -wz × scale_w` | ×1/2.094 (vlaa `GO2_MAX_YAW`) |
+| `linear.x` | `ly = vx × scale_vx` | ×0.85 |
+| `linear.y` | `lx = ±vy × scale_vy` | ×1.25; sign flip if `invert_cmd_vel_lateral` |
+| `angular.z` | `rx = -wz × scale_w` | ×1.25 |
 
 Tune online with `GET/POST /calib` (shared with sport Move).
 
@@ -294,7 +294,7 @@ less than commanded.
 | `mqtt_timeout_sec` | `1.0` | Hold after last higher-priority message. |
 | `publish_rate` | `50.0` | Hold / Nav republish Hz. |
 | `input_idle_timeout_sec` | `1.0` | One zero then pause; `0` disables. |
-| `cmd_vel_scale_vx` / `_vy` / `_w` | `0.65` / `1.65` / `1/2.094` | REST sport Move and Nav `/cmd_vel`→stick. |
+| `cmd_vel_scale_vx` / `_vy` / `_w` | `0.85` / `1.25` / `1.25` | REST sport Move and Nav `/cmd_vel`→stick. |
 | `invert_cmd_vel_lateral` | `true` | Flip Nav `linear.y` → `lx`. |
 | `log_each_rest_request` | `true` | Log HTTP apply. |
 | `log_each_mqtt_message` | `true` | Log each MQTT JSON. |

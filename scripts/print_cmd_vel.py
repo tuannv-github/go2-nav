@@ -17,9 +17,9 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_system_default
 
 # Match go2_controller_bridge defaults.
-CMD_VEL_SCALE_VX = 0.65
-CMD_VEL_SCALE_VY = 1.65
-CMD_VEL_SCALE_W = 1.0 / 2.094
+CMD_VEL_SCALE_VX = 0.85
+CMD_VEL_SCALE_VY = 1.25
+CMD_VEL_SCALE_W = 1.25
 INVERT_LATERAL = True
 
 
