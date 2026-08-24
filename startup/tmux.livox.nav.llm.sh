@@ -28,9 +28,6 @@ tmux_stack_reset_window "$SESSION" nav "$TMUX_STACK_PROJECT_DIR" \
 tmux_stack_reset_window "$SESSION" llm "$VLAA_APP_ROBOTS" \
     "VLAA_APP_ROBOTS=\"$VLAA_APP_ROBOTS\" bash \"$SCRIPT_DIR/run_vlaa.sh\""
 
-tmux_stack_reset_window "$SESSION" wifi "$SCRIPT_DIR" \
-    "bash \"$SCRIPT_DIR/wifi-heartbeat.sh\""
-
 tmux_stack_reset_window "$SESSION" monitor "$SCRIPT_DIR" \
     "bash \"$SCRIPT_DIR/system-monitor.sh\""
 

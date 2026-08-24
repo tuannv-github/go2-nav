@@ -35,15 +35,11 @@ tmux_stack_run_pane "$SESSION" control 3 "nload $WIFI_IFACE"
 tmux_stack_reset_window "$SESSION" llm "$VLAA_APP_ROBOTS" \
     "ROUTE_SCRIPT=\"$ROUTE_WIFI\" VLAA_APP_ROBOTS=\"$VLAA_APP_ROBOTS\" bash \"$SCRIPT_DIR/run_vlaa.sh\""
 
-tmux_stack_reset_window "$SESSION" wifi "$SCRIPT_DIR" \
-    "ROUTE_SCRIPT=\"$ROUTE_WIFI\" bash \"$SCRIPT_DIR/wifi-heartbeat.sh\""
-
 tmux select-window -t "$SESSION:control"
 tmux select-pane -t "$SESSION:control.2"
-echo "Session '$SESSION' started (control / llm / wifi)."
+echo "Session '$SESSION' started (control / llm)."
 echo "  control.0 — RealSense"
 echo "  control.1 — video stream"
 echo "  control.2 — go2_controller (MQTT teleop)"
 echo "  control.3 — nload $WIFI_IFACE"
-echo "  wifi — route.wifi + wifi-heartbeat"
 tmux_stack_attach "$SESSION"
