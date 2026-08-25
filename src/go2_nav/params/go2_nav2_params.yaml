@@ -105,30 +105,36 @@ controller_server:
       angular_dist_threshold: 0.785
       angular_disengage_threshold: 0.40
       forward_sampling_distance: 0.5
-      rotate_to_heading_angular_vel: 0.8
-      max_angular_accel: 1.20
+      rotate_to_heading_angular_vel: 0.25
+      # Cross yaw deadzone (0.1) in one controller tick (10 Hz): need ≥1.0.
+      # Soft 0.25 made shim emit |w|≈0.02…0.08 on /cmd_vel_nav.
+      max_angular_accel: 2.0
       simulate_ahead_time: 1.0
       rotate_to_goal_heading: True
       closed_loop: True
       debug_trajectory_details: True
-      min_vel_x: -0.1         # m/s (reverse; 0.10 acc → 1s to max)
-      min_vel_y: -0.1         # m/s
-      max_vel_x: 1.0          # m/s
-      max_vel_y: 0.1          # m/s
-      max_vel_theta: 0.8      # rad/s
-      min_speed_xy: 0.0       # m/s (magnitude in xy plane)
-      max_speed_xy: 1.01      # m/s (>= hypot(max_vel_x, max_vel_y))
-      min_speed_theta: 0.0    # rad/s
-      acc_lim_x: 0.10         # m/s^2 (1.0/0.10 = 10s to max vx from rest)
-      acc_lim_y: 0.02         # m/s^2 (0.1/0.02 = 5s to max vy from rest)
-      acc_lim_theta: 1.20     # rad/s^2 (0.8/1.20 ≈ 0.7s to max w from rest)
-      decel_lim_x: -1.00      # m/s^2 (1.0/1.00 = 1.0s from max vx to 0)
-      decel_lim_y: -0.10      # m/s^2 (0.1/0.10 = 1.0s from max vy to 0)
-      decel_lim_theta: -0.80  # rad/s^2 (0.8/0.80 = 1.0s from max w to 0)
-      vx_samples: 12         # count (DWB samples along x velocity)
-      vy_samples: 5           # count (strafe ±0.1)
-      vtheta_samples: 8       # count (DWB samples along angular velocity)
-      sim_time: 2.5           # s (forward simulation horizon for each candidate trajectory)
+      min_vel_x: -0.2          # m/s (reverse; usable [-0.2,-0.1] U [0.1,0.8])
+      min_vel_y: -0.15         # m/s (strafe; usable [-0.15,-0.1] U [0.1,0.15])
+      max_vel_x: 0.8           # m/s
+      max_vel_y: 0.15          # m/s
+      max_vel_theta: 0.25      # rad/s
+      # DWB-only deadzone (planner): reject samples inside ±0.1 so the moving
+      # window is deadzone→max, not 0→max. No bridge remap.
+      # Valid: stop, or hypot(vx,vy) >= 0.1, or |w| >= 0.1.
+      min_speed_xy: 0.1        # m/s (vx/vy deadzone floor)
+      max_speed_xy: 0.814      # m/s (>= hypot(0.8, 0.15))
+      min_speed_theta: 0.1     # rad/s (yaw deadzone floor)
+      # Soft accel after leaving deadzone; first step must clear 0.1 at 10 Hz.
+      acc_lim_x: 1.0           # m/s^2 (≥0.1 per 0.1s tick out of deadzone)
+      acc_lim_y: 1.0           # m/s^2
+      acc_lim_theta: 1.0       # rad/s^2 (≥0.1 per tick out of deadzone)
+      decel_lim_x: -1.60       # m/s^2 (0.8/1.60 = 0.5s from max vx to 0)
+      decel_lim_y: -0.30       # m/s^2 (0.15/0.30 = 0.5s from max vy to 0)
+      decel_lim_theta: -0.50   # rad/s^2 (0.25/0.50 = 0.5s from max w to 0)
+      vx_samples: 16           # finer forward speed steps
+      vy_samples: 5            # count (strafe)
+      vtheta_samples: 10       # finer yaw speed steps
+      sim_time: 2.5            # s (longer horizon → stabler speed choices)
       linear_granularity: 0.05
       angular_granularity: 0.025
       transform_tolerance: 0.2
@@ -177,9 +183,8 @@ local_costmap:
       plugins: ["obstacle_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        # Lower factor = gentler cost decay over `inflation_radius`, so the
-        # planner/controller more strongly prefer the centerline of free space.
-        cost_scaling_factor: 2.0
+        # Lower factor = flatter/gentler cost decay over `inflation_radius`.
+        cost_scaling_factor: 1.0
         # 0.40 m local halo — tighter than global 0.55 so DWB can thread closer.
         inflation_radius: 0.40
       obstacle_layer:
@@ -276,9 +281,8 @@ global_costmap:
           inf_is_valid: false
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        # Match local costmap inflation so global plan and local plan agree on
-        # how far to stay from obstacles.
-        cost_scaling_factor: 2.0
+        # Match local: flatter decay (cost_scaling_factor 1.0).
+        cost_scaling_factor: 1.0
         inflation_radius: 0.55
       always_send_full_costmap: True
 
@@ -330,9 +334,9 @@ behavior_server:
     transform_tolerance: 0.1
     use_sim_time: false
     simulate_ahead_time: 2.0
-    max_rotational_vel: 0.8
+    max_rotational_vel: 0.25
     min_rotational_vel: 0.01
-    rotational_acc_lim: 1.20
+    rotational_acc_lim: 2.0
 
 robot_state_publisher:
   ros__parameters:
@@ -352,15 +356,16 @@ waypoint_follower:
 velocity_smoother:
   ros__parameters:
     use_sim_time: False
-    smoothing_frequency: 10.0
-    scale_velocities: False
+    smoothing_frequency: 20.0
+    scale_velocities: True
     feedback: "OPEN_LOOP"
-    max_velocity: [1.0, 0.1, 0.8]
-    min_velocity: [-0.1, -0.1, -0.8]
-    # Linear: slow accel / hard brake. Yaw: faster so 180° in-place is usable.
-    max_accel: [0.10, 0.02, 1.20]
-    max_decel: [-1.00, -0.10, -0.80]
+    max_velocity: [0.8, 0.15, 0.25]
+    min_velocity: [-0.2, -0.15, -0.25]
+    # Clear ±0.1 deadzone in one smoother tick (20 Hz → need ≥2.0).
+    max_accel: [2.0, 2.0, 2.0]
+    max_decel: [-1.60, -0.30, -0.50]
     odom_topic: "/odom"
     odom_duration: 0.1
-    deadband_velocity: [0.0, 0.0, 0.0]
+    # Do not publish crawl speeds: |v|<0.1 → 0 on /cmd_vel (0 or ≥0.1 only).
+    deadband_velocity: [0.1, 0.1, 0.1]
     velocity_timeout: 1.0
