@@ -6,14 +6,13 @@
     <General>
       <Interfaces>
         <NetworkInterface name="wlan0" priority="2" multicast="default" presence_required="false" />
+        <NetworkInterface name="lo" priority="1" multicast="true" />
         <NetworkInterface name="eth0" priority="1" multicast="default" />
       </Interfaces>
     </General>
     <Discovery>
       <Peers>
         <Peer address="10.1.100.220"/>
-        <Peer address="10.1.108.250"/>
-        <Peer address="10.1.100.139"/>
       </Peers>
     </Discovery>
   </Domain>

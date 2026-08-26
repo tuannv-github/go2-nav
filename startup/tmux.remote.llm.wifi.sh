@@ -27,8 +27,8 @@ tmux_stack_ensure_four_panes "$SESSION" control "$TMUX_STACK_PROJECT_DIR"
 SETUP="cd $TMUX_STACK_PROJECT_DIR && source ./scripts/setup.sh"
 RS_SETUP="export CYCLONEDDS_URI=file://$TMUX_STACK_PROJECT_DIR/cyclonedds/cyclonedds.realsense.xml"
 
-tmux_stack_run_pane "$SESSION" control 0 "$SETUP && $RS_SETUP && ros2 launch go2_nav realsense.launch.py"
-tmux_stack_run_pane "$SESSION" control 1 "$SETUP && ros2 launch realsense_video_publisher video_publisher.launch.py"
+tmux_stack_run_pane "$SESSION" control 0 "cd $SCRIPT_DIR && ./launch_realsense.sh"
+tmux_stack_run_pane "$SESSION" control 1 "cd $SCRIPT_DIR && ./launch_video_publisher.sh"
 tmux_stack_run_pane "$SESSION" control 2 "cd $SCRIPT_DIR && ./run_go2_controller.sh"
 tmux_stack_run_pane "$SESSION" control 3 "nload $WIFI_IFACE"
 

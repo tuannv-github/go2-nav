@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Go2 Controller Bridge: strictly eth0 (robot MCU bus 192.168.123.x).
+     Operator control is handled via HTTP REST (:8081) and MQTT (TCP), not over DDS. -->
+<CycloneDDS>
+  <Domain id="any">
+    <General>
+      <Interfaces>
+        <NetworkInterface name="eth0" priority="1" multicast="default" />
+      </Interfaces>
+    </General>
+  </Domain>
+</CycloneDDS>

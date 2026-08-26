@@ -1,0 +1,1 @@
+/home/unitree/go2-nav/scripts/launch_realsense.sh

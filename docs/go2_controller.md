@@ -16,7 +16,7 @@ On this robot, WLAN is typically `10.1.100.210`, so `http://10.1.100.210:8081/do
 Package: `src/go2_controller`  
 Node: `go2_controller_bridge.py`  
 Launch: `ros2 launch go2_controller go2_controller.launch.py`  
-Startup wrapper: `startup/run_go2_controller.sh` (sets CycloneDDS `cyclonedds/cyclonedds.go2.xml`)
+Startup wrapper: `startup/run_go2_controller.sh` (sets CycloneDDS `cyclonedds/cyclonedds.controller.xml`)
 
 ## Architecture
 
@@ -308,7 +308,7 @@ less than commanded.
 
 ```bash
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-export CYCLONEDDS_URI=file://$PROJECT/cyclonedds/cyclonedds.go2.xml
+export CYCLONEDDS_URI=file://$PROJECT/cyclonedds/cyclonedds.controller.xml
 ```
 
 The dog is on **eth0** (`192.168.123.x`). Keep that interface in the Cyclone
@@ -328,7 +328,10 @@ Python: `paho-mqtt`, `starlette`, `uvicorn`
 | Symptom | Likely cause |
 |---------|----------------|
 | Motors jerk while holding a stick / HTTP `v` | Another writer on `/wirelesscontroller` (Unitree remote or MQTT zeros). Confirm `source=rest` in logs; stop MQTT transmit; put Unitree app/remote down. |
-| HTTP `/wireless` does nothing | Node not using `cyclonedds.go2.xml` / eth0; or sport mode not entered. |
+
+| Issue | Likely cause |
+|-------|--------------|
+| HTTP `/wireless` does nothing | Node not using `cyclonedds.controller.xml` / eth0; or sport mode not entered. |
 | `/cmd_vel` sport Move jerks | Mixing with `/wireless` or Unitree stick zeros. Use one path. |
 | Swagger empty / connection refused | Controller pane down; check `curl :8081/health`. |
 | Nav does not move the dog | REST or MQTT still inside the 1 s hold. |

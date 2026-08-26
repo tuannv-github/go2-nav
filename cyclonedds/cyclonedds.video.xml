@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- RealSense camera driver: strictly local loopback (lo) only.
+<!-- Realsense Video Publisher: strictly local loopback (lo) only.
      Completely independent of Wi-Fi / Ethernet state. -->
 <CycloneDDS>
   <Domain id="any">

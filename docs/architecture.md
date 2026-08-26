@@ -60,9 +60,9 @@ flowchart TB
 
 | Bus | NIC | RMW / profile | Traffic |
 |-----|-----|---------------|---------|
-| Unitree dog | eth0 `192.168.123.18` | Cyclone `cyclonedds.go2.xml` / `cyclonedds.eth0.xml` | `/utlidar/*`, `/wirelesscontroller`, `/api/sport/request` |
+| Unitree dog | eth0 `192.168.123.18` | Cyclone `cyclonedds.controller.xml` / `cyclonedds.eth0.xml` | `/utlidar/*`, `/wirelesscontroller`, `/api/sport/request` |
 | External odom | all NICs / FastDDS `fastrtps.odom-ext.xml` | `odom_ext_relay` | `/odom`, TF, `/odom_ext_relay/reset` |
-| RealSense | dedicated Cyclone `cyclonedds.realsense.xml` | RGB-D | camera topics |
+| RealSense / Video | dedicated Cyclone `cyclonedds.realsense.xml` / `cyclonedds.video.xml` | RGB-D | camera topics |
 | Operator HTTP | wlan TCP `:8081` | not DDS | teleop + calib |
 | MQTT | TCP broker | optional joystick | lower than HTTP |
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Launch go2_controller (HTTP REST :8081 → DDS /wirelesscontroller + sport Move).
-# Docs: docs/go2_controller.md
-# Uses cyclonedds/cyclonedds.controller.xml so DDS (including /wirelesscontroller) uses the configured interfaces (eth0 + wlan0).
+# Launch RTAB-Map Livox Localization node with CycloneDDS configuration.
+# Docs: docs/architecture.md
+# Uses cyclonedds/cyclonedds.nav.xml for Nav2/localization traffic.
 # Do not use `set -u` here: colcon `install/setup.bash` uses unset vars (e.g. COLCON_TRACE).
 set -eo pipefail
 
@@ -20,6 +20,6 @@ else
 fi
 
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-export CYCLONEDDS_URI="file://${PROJECT_DIR}/cyclonedds/cyclonedds.controller.xml"
+export CYCLONEDDS_URI="file://${PROJECT_DIR}/cyclonedds/cyclonedds.nav.xml"
 
-exec ros2 launch go2_controller go2_controller.launch.py "$@"
+exec ros2 launch go2_nav go2_rtabmap.livox.location.launch.py "$@"

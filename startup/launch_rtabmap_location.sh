@@ -1,0 +1,1 @@
+/home/unitree/go2-nav/startup/launch_rtabmap_localization.sh
