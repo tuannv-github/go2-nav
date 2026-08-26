@@ -21,7 +21,7 @@ tmux_stack_run_pane "$SESSION" main 2 "cd $SCRIPT_DIR && ./launch_realsense.sh"
 tmux_stack_run_pane "$SESSION" main 3 "$SETUP && $NAV_SETUP && ros2 launch go2_nav go2_rtabmap.livox.mapping.launch.py"
 
 tmux_stack_reset_window "$SESSION" livox "$TMUX_STACK_PROJECT_DIR" \
-    "$SETUP && ros2 launch go2_nav livox_mid360.launch.py"
+    "cd $SCRIPT_DIR && ./launch_livox.sh"
 
 tmux select-pane -t "$SESSION:main.0"
 tmux_stack_attach "$SESSION"

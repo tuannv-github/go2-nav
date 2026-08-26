@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Strictly local loopback CycloneDDS configuration (lo only).
+     Completely independent of Wi-Fi / Ethernet state.
+     Use for local robot nodes (e.g. waypoint follower, tools) to talk to local Nav2 / ROS 2 nodes. -->
+<CycloneDDS>
+  <Domain id="any">
+    <General>
+      <Interfaces>
+        <NetworkInterface name="lo" priority="1" multicast="true" />
+      </Interfaces>
+    </General>
+  </Domain>
+</CycloneDDS>

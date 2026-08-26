@@ -19,7 +19,7 @@ if 'RMW_IMPLEMENTATION' not in os.environ:
     os.environ['RMW_IMPLEMENTATION'] = 'rmw_cyclonedds_cpp'
 
 _script_dir = os.path.dirname(os.path.realpath(__file__))
-_cyclonedds_xml = os.path.join(os.path.dirname(_script_dir), 'cyclonedds', 'cyclonedds.xml')
+_cyclonedds_xml = os.path.join(os.path.dirname(_script_dir), 'cyclonedds', 'cyclonedds.local.xml')
 if 'CYCLONEDDS_URI' not in os.environ and os.path.exists(_cyclonedds_xml):
     os.environ['CYCLONEDDS_URI'] = f'file://{_cyclonedds_xml}'
 

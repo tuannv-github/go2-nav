@@ -22,7 +22,7 @@ tmux_stack_run_pane "$SESSION" main 2 "cd $SCRIPT_DIR && ./launch_realsense.sh"
 tmux_stack_run_pane "$SESSION" main 3 "cd $SCRIPT_DIR && ./launch_rtabmap_localization.sh"
 
 tmux_stack_reset_window "$SESSION" nav "$TMUX_STACK_PROJECT_DIR" \
-    "$SETUP && ros2 launch go2_nav livox_mid360.launch.py" \
+    "cd $SCRIPT_DIR && ./launch_livox.sh" \
     "$SETUP && $NAV_SETUP && ros2 launch go2_nav go2_nav2.launch.py"
 
 tmux_stack_reset_window "$SESSION" llm "$VLAA_APP_ROBOTS" \

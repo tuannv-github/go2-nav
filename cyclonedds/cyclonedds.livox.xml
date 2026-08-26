@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Livox MID-360 LiDAR driver: strictly local loopback (lo) only.
+     Completely independent of Wi-Fi / Ethernet state.
+     (LiDAR raw UDP packets are received over eth0 via standard sockets,
+      while ROS 2 point cloud topics publish locally over lo). -->
+<CycloneDDS>
+  <Domain id="any">
+    <General>
+      <Interfaces>
+        <NetworkInterface name="lo" priority="1" multicast="true" />
+      </Interfaces>
+    </General>
+  </Domain>
+</CycloneDDS>
