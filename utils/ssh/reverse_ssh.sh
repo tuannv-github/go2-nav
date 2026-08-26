@@ -20,8 +20,10 @@ while true; do
 
     ssh -i "$SSH_KEY" \
         -p "$SSH_PORT" \
-        -o ServerAliveInterval=30 \
+        -o ConnectTimeout=10 \
+        -o ServerAliveInterval=5 \
         -o ServerAliveCountMax=3 \
+        -o TCPKeepAlive=yes \
         -o ExitOnForwardFailure=yes \
         -o StrictHostKeyChecking=accept-new \
         -N \

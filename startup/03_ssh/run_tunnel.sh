@@ -63,8 +63,10 @@ SSH_OPTS=(
   -o IdentitiesOnly=yes
   -o IdentityAgent=none
   -o ExitOnForwardFailure=yes
-  -o ServerAliveInterval=30
+  -o ConnectTimeout=10
+  -o ServerAliveInterval=5
   -o ServerAliveCountMax=3
+  -o TCPKeepAlive=yes
   -o StrictHostKeyChecking=accept-new
   -R "${LISTEN_PORT}:localhost:${LOCAL_PORT}"
 )
