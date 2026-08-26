@@ -1,0 +1,27 @@
+[Unit]
+Description=Reverse SSH Tunnel Service
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=unitree
+Group=unitree
+WorkingDirectory=/home/unitree/go2-nav/utils/ssh
+ExecStart=/bin/bash /home/unitree/go2-nav/utils/ssh/reverse_ssh.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=reverse-ssh
+
+# Environment variables
+Environment=HOME=/home/unitree
+
+# Resource limits
+LimitNOFILE=1024
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target
