@@ -13,6 +13,7 @@ after ``mqtt_timeout_sec`` (default 1 s) with no msgs from all higher sources.
 
 import json
 import math
+import os
 import threading
 import time
 
@@ -54,8 +55,10 @@ try:
     import uvicorn
     from starlette.applications import Starlette
     from starlette.concurrency import run_in_threadpool
+    from starlette.middleware.cors import CORSMiddleware
     from starlette.responses import HTMLResponse, JSONResponse
-    from starlette.routing import Route
+    from starlette.routing import Mount, Route
+    from starlette.staticfiles import StaticFiles
 
     _REST_DEPS_AVAILABLE = True
 except ImportError:  # pragma: no cover - optional stack on minimal images
@@ -63,9 +66,12 @@ except ImportError:  # pragma: no cover - optional stack on minimal images
     uvicorn = None  # type: ignore
     Starlette = None  # type: ignore
     run_in_threadpool = None  # type: ignore
+    CORSMiddleware = None  # type: ignore
     HTMLResponse = None  # type: ignore
     JSONResponse = None  # type: ignore
+    Mount = None  # type: ignore
     Route = None  # type: ignore
+    StaticFiles = None  # type: ignore
 
 
 _WIRELESS_BODY_SCHEMA = {
@@ -138,6 +144,7 @@ _REST_OPENAPI_SPEC = {
         {'name': 'calib'},
         {'name': 'meta'},
         {'name': 'nav2'},
+        {'name': 'dongle'},
     ],
     'paths': {
         '/wireless': {
@@ -372,6 +379,13 @@ _REST_OPENAPI_SPEC = {
                 'responses': _OK_RESPONSE,
             }
         },
+        '/dongle/status': {
+            'get': {
+                'tags': ['dongle'],
+                'summary': 'Per-UE dongle system info, connection status, and 5G network info',
+                'responses': _OK_RESPONSE,
+            }
+        },
     },
 }
 
@@ -441,6 +455,23 @@ def _twist_is_zero(t: Twist) -> bool:
         and t.angular.z == 0.0
     )
 
+
+
+def _console_web_dir() -> str | None:
+    """Operator console (console/web). Override with GO2_CONSOLE_DIR."""
+    override = os.environ.get('GO2_CONSOLE_DIR', '').strip()
+    if override and os.path.isfile(os.path.join(override, 'index.html')):
+        return override
+    cur = os.path.abspath(os.path.dirname(__file__))
+    for _ in range(8):
+        candidate = os.path.join(cur, 'console', 'web')
+        if os.path.isfile(os.path.join(candidate, 'index.html')):
+            return candidate
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    return None
 
 
 class Go2ControllerBridge(Node):
@@ -1144,6 +1175,54 @@ class Go2ControllerBridge(Node):
             'message': 'local costmap cleared',
         }
 
+    def _dongle_module_dir(self) -> str | None:
+        """Directory that contains manager.py, including when this script is a symlink."""
+        here = os.path.dirname(os.path.realpath(__file__))
+        candidates = [os.path.join(here, 'dongle')]
+        cur = here
+        for _ in range(6):
+            candidates.append(os.path.join(cur, 'src', 'go2_controller', 'scripts', 'dongle'))
+            parent = os.path.dirname(cur)
+            if parent == cur:
+                break
+            cur = parent
+        for path in candidates:
+            if os.path.isfile(os.path.join(path, 'manager.py')):
+                return path
+        return None
+
+    def _dongle_status(self) -> dict:
+        """USB inventory plus modem status for every attached Pegatron dongle."""
+        mgr = getattr(self, '_dongle_mgr', None)
+        if mgr is None:
+            import sys
+            dongle_dir = self._dongle_module_dir()
+            if not dongle_dir:
+                return {
+                    'ok': False,
+                    'count': 0,
+                    'dongles': [],
+                    'detail': 'dongle manager not found next to go2_controller_bridge.py',
+                }
+            if dongle_dir not in sys.path:
+                sys.path.insert(0, dongle_dir)
+            try:
+                from manager import DongleManager
+            except ImportError as exc:
+                return {
+                    'ok': False,
+                    'count': 0,
+                    'dongles': [],
+                    'detail': f'dongle manager unavailable: {exc}',
+                }
+            mgr = DongleManager()
+            self._dongle_mgr = mgr
+        try:
+            return mgr.status()
+        except Exception as exc:
+            self.get_logger().warn(f'dongle status failed: {exc}')
+            return {'ok': False, 'count': 0, 'dongles': [], 'detail': str(exc)}
+
     def _start_rest_server(self) -> None:
         bridge = self
 
@@ -1260,32 +1339,55 @@ class Go2ControllerBridge(Node):
             code, payload = await run_in_threadpool(bridge._nav2_clear_local_costmap)
             return JSONResponse(payload, status_code=code)
 
-        app = Starlette(
-            routes=[
-                Route('/openapi.json', openapi_json, methods=['GET']),
-                Route('/docs', docs_page, methods=['GET']),
-                Route('/health', health, methods=['GET']),
-                Route('/calib', calib_get, methods=['GET']),
-                Route('/calib', calib_post, methods=['POST']),
-                Route('/calib/vx/{scale}', calib_vx_post, methods=['POST']),
-                Route('/calib/vy/{scale}', calib_vy_post, methods=['POST']),
-                Route('/calib/w/{scale}', calib_w_post, methods=['POST']),
-                Route('/wireless', wireless_post, methods=['POST']),
-                Route('/cmd_vel', cmd_vel_post, methods=['POST']),
-                Route('/cmd_vel/stop', cmd_vel_stop_post, methods=['POST']),
-                Route('/nav2/status', nav2_status, methods=['GET']),
-                Route('/nav2/goal', nav2_goal_get, methods=['GET']),
-                Route('/nav2/goal', nav2_goal, methods=['POST']),
-                Route('/nav2/cancel', nav2_cancel, methods=['POST']),
-                Route('/nav2/pose', nav2_pose_get, methods=['GET']),
-                Route('/nav2/pose', nav2_pose_post, methods=['POST']),
-                Route(
-                    '/nav2/clear_local_costmap',
-                    nav2_clear_local_costmap,
-                    methods=['POST'],
-                ),
-            ],
-        )
+        async def dongle_status(_request):
+            payload = await run_in_threadpool(bridge._dongle_status)
+            return JSONResponse(payload)
+
+        routes = [
+            Route('/openapi.json', openapi_json, methods=['GET']),
+            Route('/docs', docs_page, methods=['GET']),
+            Route('/health', health, methods=['GET']),
+            Route('/calib', calib_get, methods=['GET']),
+            Route('/calib', calib_post, methods=['POST']),
+            Route('/calib/vx/{scale}', calib_vx_post, methods=['POST']),
+            Route('/calib/vy/{scale}', calib_vy_post, methods=['POST']),
+            Route('/calib/w/{scale}', calib_w_post, methods=['POST']),
+            Route('/wireless', wireless_post, methods=['POST']),
+            Route('/cmd_vel', cmd_vel_post, methods=['POST']),
+            Route('/cmd_vel/stop', cmd_vel_stop_post, methods=['POST']),
+            Route('/nav2/status', nav2_status, methods=['GET']),
+            Route('/nav2/goal', nav2_goal_get, methods=['GET']),
+            Route('/nav2/goal', nav2_goal, methods=['POST']),
+            Route('/nav2/cancel', nav2_cancel, methods=['POST']),
+            Route('/nav2/pose', nav2_pose_get, methods=['GET']),
+            Route('/nav2/pose', nav2_pose_post, methods=['POST']),
+            Route(
+                '/nav2/clear_local_costmap',
+                nav2_clear_local_costmap,
+                methods=['POST'],
+            ),
+            Route('/dongle/status', dongle_status, methods=['GET']),
+        ]
+        console_dir = _console_web_dir()
+        if console_dir and StaticFiles is not None and Mount is not None:
+            routes.append(
+                Mount(
+                    '/console',
+                    app=StaticFiles(directory=console_dir, html=True),
+                    name='console',
+                )
+            )
+            bridge.get_logger().info(
+                f'operator console http://{bridge._rest_host}:{int(bridge._rest_port)}/console/'
+            )
+        app = Starlette(routes=routes)
+        if CORSMiddleware is not None:
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=['*'],
+                allow_methods=['*'],
+                allow_headers=['*'],
+            )
 
         def _run():
             config = uvicorn.Config(

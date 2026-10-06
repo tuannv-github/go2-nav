@@ -10,3 +10,6 @@
 [submodule "RAN-Loc"]
 	path = RAN-Loc
 	url = https://github.com/FCCLab/RAN-Loc.git
+[submodule "src/go2_controller/scripts/dongle"]
+	path = src/go2_controller/scripts/dongle
+	url = https://github.com/FCCLab/dongle.git

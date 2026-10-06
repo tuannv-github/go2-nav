@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Title is set from RAPP_CONFIG.brand.title by main.jsx -->
+  <title>NeuroRAN rApp Console</title>
+  <link rel="icon" type="image/png" href="logo/NeuroRAN.png" />
+  <link rel="stylesheet" href="src/styles.css" />
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React + Babel (in-browser transform; no build step) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+
+  <!-- devtools -->
+  <script type="text/babel" src="src/devtools/TweaksPanel.jsx"></script>
+
+  <!-- lib -->
+  <script type="text/babel" src="src/lib/format.jsx"></script>
+  <script type="text/babel" src="src/lib/bridge.jsx"></script>
+
+  <!-- theme -->
+  <script type="text/babel" src="src/theme.jsx"></script>
+
+  <!-- shared primitives -->
+  <script type="text/babel" src="src/components/Card.jsx"></script>
+  <script type="text/babel" src="src/components/SectionLabel.jsx"></script>
+  <script type="text/babel" src="src/components/StatusDot.jsx"></script>
+  <script type="text/babel" src="src/components/KpiStrip.jsx"></script>
+
+  <!-- charts -->
+  <script type="text/babel" src="src/charts/useCanvas.jsx"></script>
+  <script type="text/babel" src="src/charts/LineChart.jsx"></script>
+
+  <!-- per-rApp manifest (edit this first) -->
+  <script type="text/babel" src="src/rapp.config.jsx"></script>
+
+  <!-- tabs (one per nav entry in rapp.config.jsx; add your own here) -->
+  <script type="text/babel" src="src/tabs/DriveTab.jsx"></script>
+  <script type="text/babel" src="src/tabs/NavigateTab.jsx"></script>
+  <script type="text/babel" src="src/tabs/CalibrateTab.jsx"></script>
+  <script type="text/babel" src="src/tabs/DongleTab.jsx"></script>
+
+  <!-- shell + mount (must be last) -->
+  <script type="text/babel" src="src/appShell.jsx"></script>
+  <script type="text/babel" src="src/main.jsx"></script>
+</body>
+</html>
