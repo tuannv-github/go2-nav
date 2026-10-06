@@ -45,6 +45,13 @@ def generate_launch_description():
         DeclareLaunchArgument('cmd_vel_scale_vx', default_value='0.85'),
         DeclareLaunchArgument('cmd_vel_scale_vy', default_value='1.25'),
         DeclareLaunchArgument('cmd_vel_scale_w', default_value='1.25'),
+        DeclareLaunchArgument('robot_interface_enable', default_value='true'),
+        DeclareLaunchArgument('robot_interface_url', default_value='http://10.1.101.220:6112'),
+        DeclareLaunchArgument('robot_interface_robot_id', default_value='go2'),
+        DeclareLaunchArgument('robot_interface_name', default_value='Go2'),
+        DeclareLaunchArgument('robot_interface_imsi', default_value=''),
+        DeclareLaunchArgument('robot_interface_period_sec', default_value='0.1'),
+        DeclareLaunchArgument('robot_interface_accuracy_m', default_value='1.0'),
 
         Node(
             package='go2_controller',
@@ -74,6 +81,13 @@ def generate_launch_description():
                 'cmd_vel_scale_vx': LaunchConfiguration('cmd_vel_scale_vx'),
                 'cmd_vel_scale_vy': LaunchConfiguration('cmd_vel_scale_vy'),
                 'cmd_vel_scale_w': LaunchConfiguration('cmd_vel_scale_w'),
+                'robot_interface_enable': LaunchConfiguration('robot_interface_enable'),
+                'robot_interface_url': LaunchConfiguration('robot_interface_url'),
+                'robot_interface_robot_id': LaunchConfiguration('robot_interface_robot_id'),
+                'robot_interface_name': LaunchConfiguration('robot_interface_name'),
+                'robot_interface_imsi': LaunchConfiguration('robot_interface_imsi'),
+                'robot_interface_period_sec': LaunchConfiguration('robot_interface_period_sec'),
+                'robot_interface_accuracy_m': LaunchConfiguration('robot_interface_accuracy_m'),
             }],
         ),
     ])

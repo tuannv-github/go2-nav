@@ -14,8 +14,14 @@ after ``mqtt_timeout_sec`` (default 1 s) with no msgs from all higher sources.
 import json
 import math
 import os
+import sys
 import threading
 import time
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+from robot_interface_link import RobotInterfaceLink  # noqa: E402
 
 import paho.mqtt.client as mqtt
 import rclpy
@@ -513,6 +519,15 @@ class Go2ControllerBridge(Node):
         self.declare_parameter('input_idle_timeout_sec', 1.0)
         self.declare_parameter('log_idle_zero_publish', False)
 
+        self.declare_parameter('robot_interface_enable', True)
+        self.declare_parameter('robot_interface_url', 'http://10.1.101.220:6112')
+        self.declare_parameter('robot_interface_robot_id', 'go2')
+        self.declare_parameter('robot_interface_name', 'Go2')
+        # Unused for the announced identity. The IMSI is read from the dongle.
+        self.declare_parameter('robot_interface_imsi', '')
+        self.declare_parameter('robot_interface_period_sec', 0.1)
+        self.declare_parameter('robot_interface_accuracy_m', 1.0)
+
         self.mqtt_broker = self.get_parameter('mqtt_broker').get_parameter_value().string_value
         self.mqtt_port = self.get_parameter('mqtt_port').get_parameter_value().integer_value
         self.mqtt_topic = self.get_parameter('mqtt_topic').get_parameter_value().string_value
@@ -581,6 +596,8 @@ class Go2ControllerBridge(Node):
         )
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
+        self._robot_interface = None
+        self._start_robot_interface()
 
         self.publisher_ = self.create_publisher(WirelessController, self._out_topic, 10)
         self._sport_pub = self.create_publisher(Request, SPORT_REQUEST_TOPIC, 10)
@@ -1070,6 +1087,60 @@ class Go2ControllerBridge(Node):
         half = 0.5 * float(yaw)
         return 0.0, 0.0, math.sin(half), math.cos(half)
 
+    def _start_robot_interface(self) -> None:
+        enabled = self.get_parameter('robot_interface_enable').get_parameter_value().bool_value
+        if not enabled:
+            return
+        url = self.get_parameter('robot_interface_url').get_parameter_value().string_value
+        robot_id = self.get_parameter('robot_interface_robot_id').get_parameter_value().string_value
+        name = self.get_parameter('robot_interface_name').get_parameter_value().string_value
+        imsis = self._dongle_imsis()
+        if not imsis:
+            self.get_logger().error('robot interface not started: dongle did not report an IMSI')
+            return
+        period = self.get_parameter('robot_interface_period_sec').get_parameter_value().double_value
+        accuracy = self.get_parameter('robot_interface_accuracy_m').get_parameter_value().double_value
+        self._robot_interface = RobotInterfaceLink(
+            url=url,
+            robot_id=robot_id,
+            name=name,
+            imsis=imsis,
+            period_sec=period,
+            accuracy_m=accuracy,
+            pose_provider=self._robot_interface_pose,
+            on_command=self._on_robot_interface_command,
+            logger=self.get_logger(),
+        )
+        self._robot_interface.start()
+        self.get_logger().info(
+            f'robot interface {url} id={robot_id} imsi={",".join(imsis)} every {period:.2f}s'
+        )
+
+    def _robot_interface_pose(self):
+        try:
+            tf = self._tf_buffer.lookup_transform(
+                self._pose_frame,
+                self._base_frame,
+                rclpy.time.Time(),
+                timeout=Duration(seconds=0.05),
+            )
+        except TransformException:
+            return None
+        translation = tf.transform.translation
+        rotation = tf.transform.rotation
+        return {
+            'x': float(translation.x),
+            'y': float(translation.y),
+            'z': float(translation.z),
+            'w': self._yaw_from_quat(rotation.z, rotation.w),
+        }
+
+    def _on_robot_interface_command(self, action: str, _message: dict) -> tuple[str, str]:
+        if action in ('stop', 'hold'):
+            self._rest_cmd_vel_stop()
+            return 'applied', 'stopped'
+        return 'rejected', f'unsupported action {action}'
+
     def _nav2_get_pose(self) -> tuple[int, dict]:
         try:
             tf = self._tf_buffer.lookup_transform(
@@ -1222,6 +1293,16 @@ class Go2ControllerBridge(Node):
         except Exception as exc:
             self.get_logger().warn(f'dongle status failed: {exc}')
             return {'ok': False, 'count': 0, 'dongles': [], 'detail': str(exc)}
+
+    def _dongle_imsis(self) -> list[str]:
+        """IMSIs reported by the attached dongles (GetDeviceInfo)."""
+        found: list[str] = []
+        for row in self._dongle_status().get('dongles') or []:
+            system = row.get('system') or {}
+            imsi = str(system.get('imsi') or '').strip().removeprefix('imsi-')
+            if imsi.isdigit() and 14 <= len(imsi) <= 15 and imsi not in found:
+                found.append(imsi)
+        return found
 
     def _start_rest_server(self) -> None:
         bridge = self
