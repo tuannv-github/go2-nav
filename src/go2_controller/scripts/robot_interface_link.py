@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Declare this Go2 on the NeuroRAN robot interface and publish its location.
 
-Connects to ``/ws/robots``, sends ``hello``, then POSTs the map pose as
-``x, y, z`` metres and heading ``w`` radians to ``/api/robots/{robot_id}/location``
-every ``period_sec`` (default 0.1). The interface pushes that fix back on the
-socket; this client acks it.
+Connects to ``/ws/robots``, sends ``hello``, then sends the map pose as
+``x, y, z`` metres and heading ``w`` radians in a ``pose`` message every
+``period_sec`` (default 0.1). REST on the interface is for server-side control.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ import time
 from typing import Callable, Optional
 from urllib.parse import urlparse, urlunparse
 
-import requests
 import websocket
 
 DEFAULT_URL = 'http://10.1.101.220:6112'
@@ -65,8 +63,6 @@ class RobotInterfaceLink:
         self._ws_lock = threading.Lock()
         self._last_ok_log = 0.0
         self._last_warn_log = 0.0
-        self._post_lock = threading.Lock()
-        self._inflight = 0
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -144,7 +140,7 @@ class RobotInterfaceLink:
             while not self._stop.is_set() and reader.is_alive():
                 started = time.monotonic()
                 if self._ready.is_set():
-                    self._schedule_location()
+                    self._send_pose()
                 remain = self.period_sec - (time.monotonic() - started)
                 if remain > 0:
                     self._stop.wait(remain)
@@ -179,21 +175,21 @@ class RobotInterfaceLink:
                 self._log('info', f'welcome robot_id={message.get("robot_id")}')
                 continue
             if kind == 'location':
-                ws.send(json.dumps({
+                self._send(ws, {
                     'type': 'location_ack',
                     'seq': message.get('seq'),
                     'robot_id': self.robot_id,
-                }))
+                })
                 continue
             if kind == 'command':
                 status, detail = self._handle_command(message)
-                ws.send(json.dumps({
+                self._send(ws, {
                     'type': 'command_result',
                     'command_id': message.get('command_id'),
                     'action': message.get('action'),
                     'status': status,
                     'detail': detail,
-                }))
+                })
                 continue
             if kind == 'error':
                 self._log('warning', f'interface error: {message.get("detail")}')
@@ -211,23 +207,17 @@ class RobotInterfaceLink:
             return 'rejected', detail or 'bad status'
         return status, detail
 
-    def _schedule_location(self) -> None:
-        with self._post_lock:
-            if self._inflight >= 2:
-                return
-            self._inflight += 1
+    def _send(self, ws, payload: dict) -> None:
+        raw = json.dumps(payload)
+        with self._ws_lock:
+            ws.send(raw)
 
-        def _run():
-            try:
-                self._post_location()
-            finally:
-                with self._post_lock:
-                    self._inflight -= 1
-
-        threading.Thread(target=_run, name='robot-interface-tx', daemon=True).start()
-
-    def _post_location(self) -> None:
+    def _send_pose(self) -> None:
         if self.pose_provider is None:
+            return
+        with self._ws_lock:
+            ws = self._ws
+        if ws is None:
             return
         try:
             pose = self.pose_provider()
@@ -236,7 +226,8 @@ class RobotInterfaceLink:
             return
         if not pose:
             return
-        body = {
+        message = {
+            'type': 'pose',
             'x': float(pose['x']),
             'y': float(pose['y']),
             'z': float(pose.get('z', 0.0)),
@@ -246,26 +237,17 @@ class RobotInterfaceLink:
             'source': 'go2',
         }
         try:
-            response = requests.post(
-                f'{self.url}/api/robots/{self.robot_id}/location',
-                json=body,
-                timeout=1.0,
-            )
-        except requests.RequestException as exc:
-            self._warn(f'location post failed: {exc}')
-            return
-        if response.status_code != 200:
-            self._warn(
-                f'location post {response.status_code}: {response.text[:200]}',
-            )
+            self._send(ws, message)
+        except Exception as exc:
+            self._warn(f'pose send failed: {exc}')
             return
         now = time.monotonic()
         if now - self._last_ok_log >= 5.0:
             self._last_ok_log = now
             self._log(
                 'info',
-                f'location x={body["x"]:.2f} y={body["y"]:.2f} '
-                f'z={body["z"]:.2f} w={body["w"]:.3f}',
+                f'pose x={message["x"]:.2f} y={message["y"]:.2f} '
+                f'z={message["z"]:.2f} w={message["w"]:.3f}',
             )
 
 
