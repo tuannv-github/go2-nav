@@ -29,9 +29,15 @@ Robot id is `go2`. The name is `Go2`. The IMSI is read from the dongle (`GetDevi
 | `pose` | Client → Server |
 | `command_result` | Client → Server |
 | `location_ack` | Client → Server |
+| `terminal_output` | Client → Server |
+| `terminal_exit` | Client → Server |
 | `welcome` | Server → Client |
 | `command` | Server → Client |
 | `location` | Server → Client |
+| `terminal_open` | Server → Client |
+| `terminal_input` | Server → Client |
+| `terminal_resize` | Server → Client |
+| `terminal_close` | Server → Client |
 | `error` | Server → Client |
 
 ## Client → Server
@@ -94,6 +100,28 @@ If `map` → `base_link` is missing, that cycle is skipped.
 
 This robot applies `stop` and `hold` (both stop motion). Any other action is `rejected`.
 
+### terminal_output
+
+**Client → Server.** Bytes read from the robot shell. `data` is text.
+
+```json
+{
+  "type": "terminal_output",
+  "data": "unitree@ubuntu:~/go2-nav$ "
+}
+```
+
+### terminal_exit
+
+**Client → Server.** The shell process ended. `code` is the exit status.
+
+```json
+{
+  "type": "terminal_exit",
+  "code": 0
+}
+```
+
 ### location_ack
 
 **Client → Server.** Reply when the interface pushes a location that a server submitted. The robot's own `pose` messages do not use this ack.
@@ -152,6 +180,51 @@ This robot applies `stop` and `hold` (both stop motion). Any other action is `re
 }
 ```
 
+### terminal_open
+
+**Server → Client.** Start one interactive `/bin/bash -i` on the robot. A second open replaces the current shell.
+
+```json
+{
+  "type": "terminal_open",
+  "cols": 80,
+  "rows": 24
+}
+```
+
+### terminal_input
+
+**Server → Client.** Keystrokes for the shell, including newlines.
+
+```json
+{
+  "type": "terminal_input",
+  "data": "ls\n"
+}
+```
+
+### terminal_resize
+
+**Server → Client.** Change the shell window size.
+
+```json
+{
+  "type": "terminal_resize",
+  "cols": 120,
+  "rows": 40
+}
+```
+
+### terminal_close
+
+**Server → Client.** Stop the shell.
+
+```json
+{
+  "type": "terminal_close"
+}
+```
+
 ### error
 
 **Server → Client.** The interface rejected the session (bad hello, IMSI already held by a connected robot, or a bad message). The client closes and reconnects.
@@ -162,6 +235,20 @@ This robot applies `stop` and `hold` (both stop motion). Any other action is `re
   "detail": "IMSI 001010000000003 is already on robot-go2-01"
 }
 ```
+
+## Server-side terminal socket
+
+A server attaches a terminal with its own websocket. The interface forwards that session onto the robot socket. The first viewer sends `terminal_open`. The last viewer to disconnect sends `terminal_close`.
+
+`ws://10.1.101.220:6112/ws/terminal/go2`
+
+| Message | Direction |
+| --- | --- |
+| `terminal_input` | Server viewer → interface → robot |
+| `terminal_resize` | Server viewer → interface → robot |
+| `terminal_close` | Server viewer → interface → robot |
+| `terminal_output` | Robot → interface → server viewer |
+| `terminal_exit` | Robot → interface → server viewer |
 
 ## What the robot does not do
 

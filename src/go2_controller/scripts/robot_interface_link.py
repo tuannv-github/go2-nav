@@ -10,8 +10,16 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import pty
+import select
+import signal
+import struct
+import subprocess
 import threading
 import time
+import fcntl
+import termios
 from typing import Callable, Optional
 from urllib.parse import urlparse, urlunparse
 
@@ -30,6 +38,118 @@ def http_to_ws(url: str) -> str:
     parsed = urlparse(url.strip())
     scheme = 'wss' if parsed.scheme == 'https' else 'ws'
     return urlunparse((scheme, parsed.netloc, '', '', '', ''))
+
+
+class TerminalSession:
+    """One interactive shell on this robot, forwarded on the robot websocket."""
+
+    def __init__(self, send: Callable[[dict], None]):
+        self._send = send
+        self._lock = threading.Lock()
+        self._master: Optional[int] = None
+        self._proc: Optional[subprocess.Popen] = None
+        self._thread: Optional[threading.Thread] = None
+        self._stop = threading.Event()
+
+    def open(self, cols: int = 80, rows: int = 24) -> None:
+        self.close()
+        cols = max(1, min(int(cols), 500))
+        rows = max(1, min(int(rows), 200))
+        master, slave = pty.openpty()
+        _set_winsize(master, cols, rows)
+        try:
+            proc = subprocess.Popen(
+                ['/bin/bash', '-i'],
+                stdin=slave,
+                stdout=slave,
+                stderr=slave,
+                preexec_fn=os.setsid,
+                close_fds=True,
+                env={**os.environ, 'TERM': 'xterm-256color'},
+            )
+        except Exception:
+            os.close(master)
+            os.close(slave)
+            raise
+        os.close(slave)
+        self._stop.clear()
+        with self._lock:
+            self._master = master
+            self._proc = proc
+        self._thread = threading.Thread(target=self._read, name='robot-terminal', daemon=True)
+        self._thread.start()
+
+    def write(self, data: str) -> None:
+        raw = data.encode('utf-8', 'replace')[:8192]
+        with self._lock:
+            fd = self._master
+        if fd is None or not raw:
+            return
+        try:
+            os.write(fd, raw)
+        except OSError:
+            self.close()
+
+    def resize(self, cols: int, rows: int) -> None:
+        with self._lock:
+            fd = self._master
+        if fd is None:
+            return
+        _set_winsize(fd, max(1, min(int(cols), 500)), max(1, min(int(rows), 200)))
+
+    def close(self) -> None:
+        self._stop.set()
+        with self._lock:
+            proc = self._proc
+            fd = self._master
+            self._proc = None
+            self._master = None
+        if proc is not None and proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGHUP)
+            except OSError:
+                proc.terminate()
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    def _read(self) -> None:
+        while not self._stop.is_set():
+            with self._lock:
+                fd = self._master
+                proc = self._proc
+            if fd is None or proc is None:
+                break
+            if proc.poll() is not None:
+                break
+            readable, _, _ = select.select([fd], [], [], 0.2)
+            if fd not in readable:
+                continue
+            try:
+                raw = os.read(fd, 4096)
+            except OSError:
+                break
+            if not raw:
+                break
+            self._send({
+                'type': 'terminal_output',
+                'data': raw.decode('utf-8', 'replace'),
+            })
+        natural = not self._stop.is_set()
+        code = -1
+        with self._lock:
+            proc = self._proc
+        if proc is not None and proc.poll() is not None:
+            code = int(proc.returncode)
+        self.close()
+        if natural:
+            self._send({'type': 'terminal_exit', 'code': code})
+
+
+def _set_winsize(fd: int, cols: int, rows: int) -> None:
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
 
 
 class RobotInterfaceLink:
@@ -63,6 +183,7 @@ class RobotInterfaceLink:
         self._ws_lock = threading.Lock()
         self._last_ok_log = 0.0
         self._last_warn_log = 0.0
+        self._terminal = TerminalSession(self._send_from_terminal)
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -145,6 +266,7 @@ class RobotInterfaceLink:
                 if remain > 0:
                     self._stop.wait(remain)
         finally:
+            self._terminal.close()
             self._ready.clear()
             try:
                 ws.close()
@@ -191,6 +313,21 @@ class RobotInterfaceLink:
                     'detail': detail,
                 })
                 continue
+            if kind == 'terminal_open':
+                self._terminal_open(message)
+                continue
+            if kind == 'terminal_input':
+                self._terminal.write(str(message.get('data') or ''))
+                continue
+            if kind == 'terminal_resize':
+                self._terminal.resize(
+                    int(message.get('cols') or 80),
+                    int(message.get('rows') or 24),
+                )
+                continue
+            if kind == 'terminal_close':
+                self._terminal.close()
+                continue
             if kind == 'error':
                 self._log('warning', f'interface error: {message.get("detail")}')
                 return
@@ -206,6 +343,25 @@ class RobotInterfaceLink:
         if status not in ('applied', 'rejected', 'sent'):
             return 'rejected', detail or 'bad status'
         return status, detail
+
+    def _send_from_terminal(self, payload: dict) -> None:
+        with self._ws_lock:
+            ws = self._ws
+        if ws is None:
+            return
+        try:
+            self._send(ws, payload)
+        except Exception as exc:
+            self._warn(f'terminal send failed: {exc}')
+
+    def _terminal_open(self, message: dict) -> None:
+        try:
+            self._terminal.open(
+                int(message.get('cols') or 80),
+                int(message.get('rows') or 24),
+            )
+        except Exception as exc:
+            self._send_from_terminal({'type': 'terminal_exit', 'code': -1, 'detail': str(exc)})
 
     def _send(self, ws, payload: dict) -> None:
         raw = json.dumps(payload)
