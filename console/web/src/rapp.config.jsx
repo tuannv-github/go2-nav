@@ -9,6 +9,12 @@ const ICONS = {
       <path d="M12 4v2M12 18v2M4 12h2M18 12h2" />
     </svg>
   ),
+  pin: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z" />
+      <circle cx="12" cy="10" r="2.25" />
+    </svg>
+  ),
   map: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M9 18l-6 3V6l6-3 6 3 6-3v15l-6 3-6-3z" /><path d="M9 3v15M15 6v15" />
@@ -75,6 +81,7 @@ const RAPP_CONFIG = {
   tabs: [
     { id: "drive", label: "Drive", icon: ICONS.drive, component: "DriveTab" },
     { id: "navigate", label: "Navigate", icon: ICONS.map, component: "NavigateTab" },
+    { id: "location", label: "Location", icon: ICONS.pin, component: "LocationTab" },
     { id: "calibrate", label: "Calibrate", icon: ICONS.gear, component: "CalibrateTab" },
     { id: "dongle", label: "Dongle", icon: ICONS.dongle, component: "DongleTab" },
   ],

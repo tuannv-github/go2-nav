@@ -392,6 +392,13 @@ _REST_OPENAPI_SPEC = {
                 'responses': _OK_RESPONSE,
             }
         },
+        '/location': {
+            'get': {
+                'tags': ['location'],
+                'summary': 'Robot pose and the latest ran-loc mixture',
+                'responses': _OK_RESPONSE,
+            }
+        },
     },
 }
 
@@ -1135,6 +1142,63 @@ class Go2ControllerBridge(Node):
             'w': self._yaw_from_quat(rotation.z, rotation.w),
         }
 
+    def _location_view(self) -> dict:
+        robot_id = (
+            self.get_parameter('robot_interface_robot_id').get_parameter_value().string_value
+            or 'go2'
+        )
+        accuracy = self.get_parameter('robot_interface_accuracy_m').get_parameter_value().double_value
+        link = self._robot_interface
+        imsis = list(getattr(link, 'imsis', []) or []) if link is not None else []
+        imsi = imsis[0] if imsis else ''
+        stored = None
+        if link is not None:
+            getter = getattr(link, 'ran_loc_estimates', None)
+            if callable(getter):
+                stored = getter()
+        code, pose = self._nav2_get_pose()
+        pose_row = None
+        if code == 200:
+            pose_row = {
+                'robot_id': robot_id,
+                'imsi': imsi,
+                'x': pose['x'],
+                'y': pose['y'],
+                'z': pose['z'],
+                'w': pose['yaw'],
+                'accuracy_m': float(accuracy),
+                'source': 'go2',
+                'frame_id': pose.get('frame_id') or self._pose_frame,
+                'connected': True,
+            }
+        estimates = []
+        if stored:
+            for loc in stored.get('locations') or []:
+                estimates.append({
+                    'seq': loc.get('seq'),
+                    'robot_id': stored.get('robot_id') or robot_id,
+                    'imsi': stored.get('imsi') or imsi,
+                    'x': loc['x'],
+                    'y': loc['y'],
+                    'z': loc['z'],
+                    'w': loc['w'],
+                    'accuracy_m': loc['accuracy_m'],
+                    'weight': loc['weight'],
+                    'source': stored.get('source') or 'ran-loc',
+                    'estimated_at': stored.get('estimated_at'),
+                    'delivered': True,
+                })
+        return {
+            'ok': True,
+            'robot_id': robot_id,
+            'imsi': imsi,
+            'pose': pose_row,
+            'estimates': estimates,
+            'seq': None if stored is None else stored.get('seq'),
+            'source': None if stored is None else stored.get('source'),
+            'estimated_at': None if stored is None else stored.get('estimated_at'),
+        }
+
     def _on_robot_interface_command(self, action: str, _message: dict) -> tuple[str, str]:
         if action in ('stop', 'hold'):
             self._rest_cmd_vel_stop()
@@ -1424,6 +1488,10 @@ class Go2ControllerBridge(Node):
             payload = await run_in_threadpool(bridge._dongle_status)
             return JSONResponse(payload)
 
+        async def location_get(_request):
+            payload = await run_in_threadpool(bridge._location_view)
+            return JSONResponse(payload)
+
         routes = [
             Route('/openapi.json', openapi_json, methods=['GET']),
             Route('/docs', docs_page, methods=['GET']),
@@ -1448,6 +1516,7 @@ class Go2ControllerBridge(Node):
                 methods=['POST'],
             ),
             Route('/dongle/status', dongle_status, methods=['GET']),
+            Route('/location', location_get, methods=['GET']),
         ]
         console_dir = _console_web_dir()
         if console_dir and StaticFiles is not None and Mount is not None:

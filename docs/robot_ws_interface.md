@@ -16,7 +16,7 @@ Go2  --websocket-->  ws://10.1.101.220:6112/ws/robots
 2. First message is `hello` (robot id, name, IMSIs).
 3. Wait for `welcome`.
 4. Send `pose` every 0.1 s.
-5. On the same socket, answer `command` with `command_result`, and answer a server-pushed `location` with `location_ack`.
+5. On the same socket, answer `command` with `command_result`, answer a server-pushed `location` with `location_ack`, and answer an `estimates` mixture with `estimates_ack`.
 6. If the socket drops, wait 1 s and connect again.
 
 Robot id is `go2`. The name is `Go2`. The IMSI is read from the dongle (`GetDeviceInfo`), not from a fixed placeholder. On this robot that IMSI is `001010000000003`.
@@ -29,11 +29,13 @@ Robot id is `go2`. The name is `Go2`. The IMSI is read from the dongle (`GetDevi
 | `pose` | Client → Server |
 | `command_result` | Client → Server |
 | `location_ack` | Client → Server |
+| `estimates_ack` | Client → Server |
 | `terminal_output` | Client → Server |
 | `terminal_exit` | Client → Server |
 | `welcome` | Server → Client |
 | `command` | Server → Client |
 | `location` | Server → Client |
+| `estimates` | Server → Client |
 | `terminal_open` | Server → Client |
 | `terminal_input` | Server → Client |
 | `terminal_resize` | Server → Client |
@@ -122,9 +124,21 @@ This robot applies `stop` and `hold` (both stop motion). Any other action is `re
 }
 ```
 
+### estimates_ack
+
+**Client → Server.** One reply to an `estimates` mixture. `seq` is the top-level sequence of that message, not a sequence from inside `locations`.
+
+```json
+{
+  "type": "estimates_ack",
+  "seq": 10,
+  "robot_id": "go2"
+}
+```
+
 ### location_ack
 
-**Client → Server.** Reply when the interface pushes a location that a server submitted. The robot's own `pose` messages do not use this ack.
+**Client → Server.** Reply when the interface pushes one older `location` fix. The robot's own `pose` messages do not use this ack, and an `estimates` mixture uses `estimates_ack` instead.
 
 ```json
 {
@@ -161,9 +175,30 @@ This robot applies `stop` and `hold` (both stop motion). Any other action is `re
 }
 ```
 
+### estimates
+
+**Server → Client.** The ran-loc location mixture for this robot, one tick in one message. The robot stores this set and replaces the previous ran-loc set. It does not use these points as its own `pose`. Acknowledge once with `estimates_ack` and the top-level `seq`. Ignore the message when `robot_id` is not this robot.
+
+`locations` is the full set, highest weight first. `x` and `y` are east and north in metres in the map frame. `z` and `w` are copied from the robot pose at that tick. `accuracy_m` is the uncertainty radius in metres. `weight` is the mixture weight, from 0 to 1, and the weights in one message sum to about 1. A heavier weight is the more likely location.
+
+```json
+{
+  "type": "estimates",
+  "seq": 10,
+  "robot_id": "go2",
+  "imsi": "001010000000003",
+  "source": "ran-loc",
+  "estimated_at": "2026-10-07T15:00:00+00:00",
+  "locations": [
+    {"seq": 10, "x": 38.6, "y": -0.5, "z": -0.25, "w": -0.002, "accuracy_m": 1.12, "weight": 0.41},
+    {"seq": 11, "x": 30.1, "y": 1.4, "z": -0.25, "w": -0.002, "accuracy_m": 2.40, "weight": 0.38}
+  ]
+}
+```
+
 ### location
 
-**Server → Client.** A fix that a server submitted through REST, pushed back to the robot. Acknowledge it with `location_ack`.
+**Server → Client.** One fix from an older server post, pushed back to the robot. Acknowledge it with `location_ack`. A ran-loc mixture arrives as `estimates`, not as this message.
 
 ```json
 {

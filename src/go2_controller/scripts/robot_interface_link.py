@@ -3,7 +3,9 @@
 
 Connects to ``/ws/robots``, sends ``hello``, then sends the map pose as
 ``x, y, z`` metres and heading ``w`` radians in a ``pose`` message every
-``period_sec`` (default 0.1). REST on the interface is for server-side control.
+``period_sec`` (default 0.1). A server ``estimates`` message is stored as the
+ran-loc mixture and acked; it is not the robot pose. REST on the interface is
+for server-side control.
 """
 
 from __future__ import annotations
@@ -148,6 +150,30 @@ class TerminalSession:
             self._send({'type': 'terminal_exit', 'code': code})
 
 
+def _parse_estimate_locations(raw) -> list[dict]:
+    """Keep one ran-loc tick. Highest weight first. Not the robot pose."""
+    if not isinstance(raw, list):
+        return []
+    locations = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            locations.append({
+                'seq': item.get('seq'),
+                'x': float(item['x']),
+                'y': float(item['y']),
+                'z': float(item.get('z', 0.0)),
+                'w': float(item.get('w', 0.0)),
+                'accuracy_m': float(item.get('accuracy_m', 0.0)),
+                'weight': float(item.get('weight', 0.0)),
+            })
+        except (TypeError, ValueError, KeyError):
+            continue
+    locations.sort(key=lambda fix: fix['weight'], reverse=True)
+    return locations
+
+
 def _set_winsize(fd: int, cols: int, rows: int) -> None:
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
 
@@ -183,6 +209,9 @@ class RobotInterfaceLink:
         self._ws_lock = threading.Lock()
         self._last_ok_log = 0.0
         self._last_warn_log = 0.0
+        self._estimates_lock = threading.Lock()
+        self._ran_loc: Optional[dict] = None
+        self._last_estimates_log = 0.0
         self._terminal = TerminalSession(self._send_from_terminal)
 
     def start(self) -> None:
@@ -303,6 +332,9 @@ class RobotInterfaceLink:
                     'robot_id': self.robot_id,
                 })
                 continue
+            if kind == 'estimates':
+                self._store_estimates(ws, message)
+                continue
             if kind == 'command':
                 status, detail = self._handle_command(message)
                 self._send(ws, {
@@ -331,6 +363,48 @@ class RobotInterfaceLink:
             if kind == 'error':
                 self._log('warning', f'interface error: {message.get("detail")}')
                 return
+
+    def ran_loc_estimates(self) -> Optional[dict]:
+        """Latest ran-loc mixture, or None. This is not the robot pose."""
+        with self._estimates_lock:
+            if self._ran_loc is None:
+                return None
+            return {
+                'seq': self._ran_loc['seq'],
+                'robot_id': self._ran_loc['robot_id'],
+                'imsi': self._ran_loc['imsi'],
+                'source': self._ran_loc['source'],
+                'estimated_at': self._ran_loc['estimated_at'],
+                'locations': [dict(item) for item in self._ran_loc['locations']],
+            }
+
+    def _store_estimates(self, ws, message: dict) -> None:
+        if message.get('robot_id') != self.robot_id:
+            return
+        locations = _parse_estimate_locations(message.get('locations'))
+        stored = {
+            'seq': message.get('seq'),
+            'robot_id': self.robot_id,
+            'imsi': message.get('imsi'),
+            'source': message.get('source') or 'ran-loc',
+            'estimated_at': message.get('estimated_at'),
+            'locations': locations,
+        }
+        with self._estimates_lock:
+            self._ran_loc = stored
+        self._send(ws, {
+            'type': 'estimates_ack',
+            'seq': message.get('seq'),
+            'robot_id': self.robot_id,
+        })
+        now = time.monotonic()
+        if now - self._last_estimates_log >= 5.0:
+            self._last_estimates_log = now
+            top = locations[0]['weight'] if locations else 0.0
+            self._log(
+                'info',
+                f'ran-loc seq={message.get("seq")} n={len(locations)} top_weight={top:.2f}',
+            )
 
     def _handle_command(self, message: dict) -> tuple[str, str]:
         action = str(message.get('action') or '')
