@@ -26,6 +26,7 @@ from robot_interface_link import RobotInterfaceLink  # noqa: E402
 import paho.mqtt.client as mqtt
 import rclpy
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
+from go2_controller_msgs.msg import RanFix, RanLoc
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
 from rclpy.node import Node
@@ -56,6 +57,16 @@ DEFAULT_CLEAR_LOCAL_COSTMAP_SERVICE = '/local_costmap/clear_entirely_local_costm
 DEFAULT_CMD_VEL_SCALE_VX = 0.85
 DEFAULT_CMD_VEL_SCALE_VY = 1.25
 DEFAULT_CMD_VEL_SCALE_W = 1.25
+
+
+def _ran_seq(value) -> int:
+    try:
+        seq = int(value)
+    except (TypeError, ValueError):
+        return 0
+    if seq < 0:
+        return 0
+    return seq & 0xFFFFFFFF
 
 try:
     import uvicorn
@@ -604,6 +615,7 @@ class Go2ControllerBridge(Node):
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
         self._robot_interface = None
+        self._ran_loc_pub = self.create_publisher(RanLoc, '/ran_loc', 10)
         self._start_robot_interface()
 
         self.publisher_ = self.create_publisher(WirelessController, self._out_topic, 10)
@@ -1116,6 +1128,7 @@ class Go2ControllerBridge(Node):
             accuracy_m=accuracy,
             pose_provider=self._robot_interface_pose,
             on_command=self._on_robot_interface_command,
+            on_estimates=self._publish_ran_loc,
             logger=self.get_logger(),
         )
         self._robot_interface.start()
@@ -1198,6 +1211,41 @@ class Go2ControllerBridge(Node):
             'source': None if stored is None else stored.get('source'),
             'estimated_at': None if stored is None else stored.get('estimated_at'),
         }
+
+    def _publish_ran_loc(self, stored: dict) -> None:
+        locations = stored.get('locations') or []
+        msg = RanLoc()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = self._pose_frame
+        msg.seq = _ran_seq(stored.get('seq'))
+        msg.robot_id = str(stored.get('robot_id') or '')
+        msg.imsi = str(stored.get('imsi') or '')
+        msg.source = str(stored.get('source') or '')
+        msg.estimated_at = str(stored.get('estimated_at') or '')
+        for loc in locations:
+            fix = RanFix()
+            fix.seq = _ran_seq(loc.get('seq'))
+            fix.x = float(loc['x'])
+            fix.y = float(loc['y'])
+            fix.z = float(loc['z'])
+            fix.w = float(loc['w'])
+            fix.accuracy_m = float(loc.get('accuracy_m') or 0.0)
+            fix.weight = float(loc.get('weight') or 0.0)
+            msg.locations.append(fix)
+        self._ran_loc_pub.publish(msg)
+        top = locations[0] if locations else None
+        if top is None:
+            detail = 'n=0'
+        else:
+            detail = (
+                f'n={len(locations)} '
+                f'x={float(top["x"]):.2f} y={float(top["y"]):.2f} '
+                f'w={float(top["w"]):.3f} weight={float(top.get("weight") or 0.0):.2f}'
+            )
+        self.get_logger().info(
+            f'ran-loc /ran_loc seq={stored.get("seq")} {detail}',
+            throttle_duration_sec=5.0,
+        )
 
     def _on_robot_interface_command(self, action: str, _message: dict) -> tuple[str, str]:
         if action in ('stop', 'hold'):

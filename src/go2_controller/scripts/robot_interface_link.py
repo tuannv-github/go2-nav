@@ -191,6 +191,7 @@ class RobotInterfaceLink:
         accuracy_m: float = DEFAULT_ACCURACY_M,
         pose_provider: Optional[Callable[[], Optional[dict]]] = None,
         on_command: Optional[Callable[[str, dict], tuple[str, str]]] = None,
+        on_estimates: Optional[Callable[[dict], None]] = None,
         logger=None,
     ):
         self.url = url.rstrip('/')
@@ -201,6 +202,7 @@ class RobotInterfaceLink:
         self.accuracy_m = float(accuracy_m)
         self.pose_provider = pose_provider
         self.on_command = on_command
+        self.on_estimates = on_estimates
         self.logger = logger
         self._stop = threading.Event()
         self._ready = threading.Event()
@@ -392,6 +394,18 @@ class RobotInterfaceLink:
         }
         with self._estimates_lock:
             self._ran_loc = stored
+        if self.on_estimates is not None:
+            try:
+                self.on_estimates({
+                    'seq': stored['seq'],
+                    'robot_id': stored['robot_id'],
+                    'imsi': stored['imsi'],
+                    'source': stored['source'],
+                    'estimated_at': stored['estimated_at'],
+                    'locations': [dict(item) for item in stored['locations']],
+                })
+            except Exception as exc:
+                self._warn(f'ran-loc publish failed: {exc}')
         self._send(ws, {
             'type': 'estimates_ack',
             'seq': message.get('seq'),
